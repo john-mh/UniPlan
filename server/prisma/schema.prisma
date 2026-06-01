@@ -1,0 +1,101 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ── Institutional Tables (READ-ONLY, external schema) ──
+// students(id, first_name, last_name, email, birth_date, birth_place_code, campus_code, program_code)
+// employees(id, first_name, last_name, email, contract_type, employee_type, faculty_code, campus_code, birth_place_code)
+// users(username, password_hash, role, student_id?, employee_id?, is_active)
+// enrollments(student_id, nrc, status)
+// groups(nrc, subject_code, semester, group_number, professor_id, campus_code)
+// subjects(code, name, program_code)
+// programs(code, name, faculty_code)
+// faculties(code, name)
+// These tables are accessed via raw SQL only. UniPlan never writes to them (except users table during registration).
+
+model Organizer {
+  id             Int      @id @default(autoincrement())
+  employeeId     String?  @unique @map("employee_id")
+  studentId      String?  @unique @map("student_id")
+  organizerType  String   @map("organizer_type")
+  department     String?
+  specialization String?
+  semester       Int?
+  studentGroup   String?  @map("student_group")
+  adminArea      String?  @map("admin_area")
+  positionTitle  String?  @map("position_title")
+  isActive       Boolean  @default(true) @map("is_active")
+  approvedByAdmin Boolean @default(false) @map("approved_by_admin")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  events Event[]
+
+  @@index([approvedByAdmin])
+  @@index([isActive])
+
+  @@map("uniplan_organizers")
+}
+
+model Event {
+  id               Int      @id @default(autoincrement())
+  uniqueCode       String   @unique @map("unique_code")
+  title            String
+  description      String
+  eventType        String   @map("event_type")
+  date             DateTime @db.Date
+  startTime        String   @map("start_time") @db.VarChar(5)
+  endTime          String   @map("end_time") @db.VarChar(5)
+  location         String
+  maxAttendees     Int      @map("max_attendees")
+  organizerId      Int      @map("organizer_id")
+  status           String   @default("UPCOMING")
+  mongodbDetailId  String   @map("mongodb_detail_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  organizer  Organizer      @relation(fields: [organizerId], references: [id])
+  registrations Registration[]
+  statistics  EventStatistics?
+
+  @@index([date])
+  @@index([eventType])
+  @@index([status])
+  @@index([organizerId])
+
+  @@map("uniplan_events")
+}
+
+model Registration {
+  id                Int       @id @default(autoincrement())
+  studentId         String    @map("student_id")
+  eventId           Int       @map("event_id")
+  registrationDate  DateTime  @default(now()) @map("registration_date")
+  status            String    @default("REGISTERED")
+  cancellationDate  DateTime? @map("cancellation_date")
+
+  event Event @relation(fields: [eventId], references: [id])
+
+  @@unique([studentId, eventId])
+  @@index([studentId, eventId], name: "unique_active_registration")
+  @@index([status])
+  @@index([eventId])
+
+  @@map("uniplan_registrations")
+}
+
+model EventStatistics {
+  id               Int      @id @default(autoincrement())
+  eventId          Int      @unique @map("event_id")
+  totalRegistered  Int      @default(0) @map("total_registered")
+  totalCancelled   Int      @default(0) @map("total_cancelled")
+  totalAttended    Int      @default(0) @map("total_attended")
+  lastUpdated      DateTime @default(now()) @map("last_updated")
+
+  event Event @relation(fields: [eventId], references: [id])
+
+  @@map("uniplan_statistics")
+}

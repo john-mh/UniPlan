@@ -1,0 +1,26 @@
+{
+  "name": "uniplan",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "client",
+    "server",
+    "shared"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:client": "npm run dev -w client",
+    "dev:server": "npm run dev -w server",
+    "build": "npm run build -w shared && npm run build -w server && npm run build -w client",
+    "lint": "eslint . --ext .ts,.tsx",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "typescript": "^5.4.5"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.8.0",
+    "pg": "^8.21.0"
+  }
+}
