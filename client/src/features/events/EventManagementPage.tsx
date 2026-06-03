@@ -17,30 +17,30 @@ export function EventManagementPage() {
 
   const { data: event } = useQuery({
     queryKey: ['event', id],
-    queryFn: () => api.getEvent(Number(id)),
+    queryFn: () => api.getEvent(id!),
     enabled: !!id,
   });
 
   const { data: eventStats } = useQuery({
     queryKey: ['eventStats', id],
-    queryFn: () => api.getEventStatistics(Number(id)),
+    queryFn: () => api.getEventStatistics(id!),
     enabled: !!id,
   });
 
   const { data: registrations, isLoading: regLoading } = useQuery({
     queryKey: ['eventRegistrations', id],
-    queryFn: () => api.getEventRegistrations(Number(id)),
+    queryFn: () => api.getEventRegistrations(id!),
     enabled: !!id && activeTab === 'registrations',
   });
 
   const { data: messages, isLoading: msgLoading } = useQuery({
     queryKey: ['messages', id],
-    queryFn: () => api.getMessageHistory(Number(id)),
+    queryFn: () => api.getMessageHistory(id!),
     enabled: !!id && activeTab === 'messages',
   });
 
   const sendMessageMutation = useMutation({
-    mutationFn: (text: string) => api.sendMessage(Number(id), text),
+    mutationFn: (text: string) => api.sendMessage(id!, text),
     onSuccess: () => {
       toast.success('Message sent');
       setMessageText('');
@@ -51,7 +51,7 @@ export function EventManagementPage() {
 
   const handleExportCSV = async () => {
     try {
-      const csv = await api.exportEventCSV(Number(id));
+      const csv = await api.exportEventCSV(id!);
       const blob = new Blob([csv], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');

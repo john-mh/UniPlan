@@ -16,7 +16,7 @@ export function ProfilePage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [cancelId, setCancelId] = useState<number | null>(null);
+  const [cancelId, setCancelId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'registrations' | 'recommended'>('registrations');
 
   const { data: registrations, isLoading: regLoading, isError: regError, refetch: regRefetch } = useQuery({
@@ -31,7 +31,7 @@ export function ProfilePage() {
   });
 
   const cancelMutation = useMutation({
-    mutationFn: (id: number) => api.cancelRegistration(id),
+    mutationFn: (id: string) => api.cancelRegistration(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['myRegistrations'] });
       toast.success('Registration cancelled');

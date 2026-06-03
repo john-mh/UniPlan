@@ -1,5 +1,5 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import * as api from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
@@ -13,12 +13,13 @@ import { formatDate, formatTime } from '../../lib/format';
 export function EventDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated } = useAuth();
   const [showConfirm, setShowConfirm] = useState(false);
+  const queryClient = useQueryClient();
 
   const { data: event, isLoading } = useQuery({
     queryKey: ['event', id],
-    queryFn: () => api.getEvent(Number(id)),
+    queryFn: () => api.getEvent(id!),
     enabled: !!id,
   });
 
@@ -29,9 +30,11 @@ export function EventDetailPage() {
   });
 
   const registerMutation = useMutation({
-    mutationFn: () => api.registerForEvent(Number(id)),
+    mutationFn: () => api.registerForEvent(id!),
     onSuccess: () => {
       toast.success('Successfully registered!');
+      queryClient.invalidateQueries({ queryKey: ['event', id] });
+      queryClient.invalidateQueries({ queryKey: ['myRegistrations'] });
       setShowConfirm(false);
     },
     onError: (err: any) => {

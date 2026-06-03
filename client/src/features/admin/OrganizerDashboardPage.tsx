@@ -8,12 +8,13 @@ import { Button } from '../../components/common/Button';
 import { Skeleton } from '../../components/common/Skeleton';
 import { EmptyState } from '../../components/common/EmptyState';
 import { Badge } from '../../components/common/Badge';
-import { formatDate, formatTime } from '../../lib/format';
+import { formatDate } from '../../lib/format';
 
 export function OrganizerDashboardPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const [duplicatingId, setDuplicatingId] = useState<number | null>(null);
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const { data: eventsData, isLoading } = useQuery({
     queryKey: ['organizerEvents', user?.id],
@@ -34,7 +35,7 @@ export function OrganizerDashboardPage() {
   }).length;
 
   const duplicateMutation = useMutation({
-    mutationFn: ({ id, newDate }: { id: number; newDate?: string }) => api.duplicateEvent(id, newDate),
+    mutationFn: ({ id, newDate }: { id: string; newDate?: string }) => api.duplicateEvent(id, newDate),
     onSuccess: () => {
       toast.success('Event duplicated!');
       queryClient.invalidateQueries({ queryKey: ['organizerEvents'] });
@@ -43,6 +44,19 @@ export function OrganizerDashboardPage() {
     onError: (err: any) => {
       toast.error(err.response?.data?.message || 'Failed to duplicate');
       setDuplicatingId(null);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.deleteEvent(id),
+    onSuccess: () => {
+      toast.success('Event deleted!');
+      queryClient.invalidateQueries({ queryKey: ['organizerEvents'] });
+      setDeletingId(null);
+    },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.message || 'Failed to delete');
+      setDeletingId(null);
     },
   });
 
@@ -104,6 +118,7 @@ export function OrganizerDashboardPage() {
                       <Link to={`/organizer/events/${e.id}`}><Button variant="outline" size="sm">Manage</Button></Link>
                       <Link to={`/organizer/events/${e.id}/edit`}><Button variant="outline" size="sm">Edit</Button></Link>
                       <Button variant="outline" size="sm" loading={duplicatingId === e.id && duplicateMutation.isPending} onClick={() => { setDuplicatingId(e.id); duplicateMutation.mutate({ id: e.id }); }}>Dup</Button>
+                      <Button variant="outline" size="sm" loading={deletingId === e.id && deleteMutation.isPending} onClick={() => { if (window.confirm(`Delete "${e.title}"? This cannot be undone.`)) { setDeletingId(e.id); deleteMutation.mutate(e.id); } }} className="text-red-600 border-red-300 hover:bg-red-50">Del</Button>
                     </div>
                   </td>
                 </tr>

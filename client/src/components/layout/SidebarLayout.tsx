@@ -39,6 +39,14 @@ export function SidebarLayout({ subtitle, navItems, userPrefix }: SidebarLayoutP
             );
           })}
         </nav>
+        <div className="px-3 mb-4">
+          <Link
+            to="/"
+            className="block px-4 py-2.5 rounded-lg text-sm text-primary-300 hover:text-white border border-primary-800 text-center"
+          >
+            ← Back to Events
+          </Link>
+        </div>
         {user && (
           <div className="p-6 border-t border-primary-800">
             <p className="text-white text-sm font-medium">

@@ -1,5 +1,6 @@
 export function formatDate(dateStr: string, long?: boolean): string {
-  const d = new Date(dateStr + 'T00:00:00');
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return 'Invalid Date';
   return long
     ? d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
     : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });

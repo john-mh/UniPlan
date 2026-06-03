@@ -15,9 +15,13 @@ export function LoginPage() {
     e.preventDefault();
     setLoading(true);
     try {
-      await login(username, password);
+      const result = await login(username, password);
       toast.success('Welcome back!');
-      navigate('/');
+      if (result.role === 'ADMIN' || result.role === 'ORGANIZER') {
+        navigate('/organizer/events');
+      } else {
+        navigate('/');
+      }
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Invalid credentials');
     } finally {

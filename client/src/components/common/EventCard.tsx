@@ -21,10 +21,10 @@ export function EventCard({ event }: EventCardProps) {
   return (
     <div
       onClick={() => navigate(`/events/${event.id}`)}
-      className="bg-white rounded-xl border border-gray-200 overflow-hidden cursor-pointer hover:shadow-md transition-shadow group"
+      className="bg-white rounded-xl border border-gray-200 overflow-hidden cursor-pointer hover:shadow-md transition-shadow group h-full flex flex-col"
     >
-      <div className="h-1.5" style={{ backgroundColor: getEventColor(event.eventType) }} />
-      <div className="p-5">
+      <div className="h-1.5 shrink-0" style={{ backgroundColor: getEventColor(event.eventType) }} />
+      <div className="p-5 flex flex-col flex-1">
         <div className="flex items-center justify-between mb-3">
           <Badge type="event" value={event.eventType} />
           {urgencyBadge && <Badge type="urgency" value={urgencyBadge} />}
@@ -37,26 +37,28 @@ export function EventCard({ event }: EventCardProps) {
           <p>🕐 {formatTime(event.startTime)} — {formatTime(event.endTime)}</p>
           <p>📍 {event.location}</p>
         </div>
-        <div className="mt-4">
-          <div className="flex justify-between text-xs text-gray-400 mb-1">
-            <span>{event.currentRegistrations} / {event.maxAttendees} spots</span>
-            <span>{pct}% filled</span>
+        <div className="mt-auto pt-4">
+          <div>
+            <div className="flex justify-between text-xs text-gray-400 mb-1">
+              <span>{event.currentRegistrations} / {event.maxAttendees} spots</span>
+              <span>{pct}% filled</span>
+            </div>
+            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all"
+                style={{ width: `${pct}%`, backgroundColor: getEventColor(event.eventType) }}
+              />
+            </div>
           </div>
-          <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-            <div
-              className="h-full rounded-full transition-all"
-              style={{ width: `${pct}%`, backgroundColor: getEventColor(event.eventType) }}
-            />
+          <div className="mt-4">
+            <span
+              className={`block text-center py-2 rounded-lg text-sm font-medium transition-colors ${
+                nearFull ? 'bg-amber-500 text-white' : 'bg-primary-600 text-white group-hover:bg-primary-700'
+              }`}
+            >
+              {nearFull ? 'Almost Full!' : 'View & Register'}
+            </span>
           </div>
-        </div>
-        <div className="mt-4">
-          <span
-            className={`block text-center py-2 rounded-lg text-sm font-medium transition-colors ${
-              nearFull ? 'bg-amber-500 text-white' : 'bg-primary-600 text-white group-hover:bg-primary-700'
-            }`}
-          >
-            {nearFull ? 'Almost Full!' : 'View & Register'}
-          </span>
         </div>
       </div>
     </div>

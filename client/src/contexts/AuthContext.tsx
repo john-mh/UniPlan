@@ -6,7 +6,7 @@ interface AuthContextType {
   user: UserDto | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<UserDto>;
   register: (studentCode: string, email: string, password: string) => Promise<void>;
   logout: () => void;
 }
@@ -37,6 +37,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('accessToken', res.accessToken);
     localStorage.setItem('refreshToken', res.refreshToken);
     setUser(res.user);
+    return res.user;
   }, []);
 
   const register = useCallback(async (studentCode: string, email: string, password: string) => {

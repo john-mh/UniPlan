@@ -21,11 +21,10 @@ export function CreateEventPage() {
     startTime: '', endTime: '', location: '', maxAttendees: 30,
   });
   const [typeFields, setTypeFields] = useState<TypeSpecificFields>({});
-  const [loading, setLoading] = useState(false);
 
   const { data: existingEvent, isLoading: loadingEvent } = useQuery({
     queryKey: ['event', id],
-    queryFn: () => api.getEvent(Number(id)),
+    queryFn: () => api.getEvent(id!),
     enabled: isEdit,
   });
 
@@ -59,7 +58,7 @@ export function CreateEventPage() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: (data: Record<string, unknown>) => api.updateEvent(Number(id), data),
+    mutationFn: (data: Record<string, unknown>) => api.updateEvent(id!, data),
     onSuccess: () => {
       toast.success('Event updated!');
       navigate('/organizer/events');

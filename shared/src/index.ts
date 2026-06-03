@@ -40,7 +40,7 @@ export interface UserDto {
 }
 
 export interface EventDto {
-  id: number;
+  id: string;
   uniqueCode: string;
   title: string;
   description: string;
@@ -51,15 +51,14 @@ export interface EventDto {
   location: string;
   maxAttendees: number;
   currentRegistrations: number;
-  organizerId: number;
+  organizerId: string;
   organizerName: string;
   status: EventStatus;
-  mongodbDetailId: string;
 }
 
 export interface EventDetailDto {
   [key: string]: unknown;
-  eventId: number;
+  eventId: string;
   eventType: EventType;
 }
 
@@ -102,9 +101,9 @@ export interface OtherEventDetail extends EventDetailDto {
 }
 
 export interface RegistrationDto {
-  id: number;
+  id: string;
   studentId: string;
-  eventId: number;
+  eventId: string;
   eventTitle?: string;
   eventType?: EventType;
   eventDate?: string;
@@ -114,7 +113,7 @@ export interface RegistrationDto {
 }
 
 export interface OrganizerDto {
-  id: number;
+  id: string;
   employeeId?: string;
   studentId?: string;
   organizerType: OrganizerType;
@@ -131,12 +130,13 @@ export interface OrganizerDto {
 }
 
 export interface EventStatsDto {
-  eventId: number;
+  eventId: string;
   eventTitle?: string;
   totalRegistered: number;
   totalCancelled: number;
   totalAttended: number;
   occupancyPercentage: number;
+  demographics?: Record<string, unknown>;
 }
 
 export interface LoginRequest {

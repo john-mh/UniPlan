@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import * as api from '../../services/api';
 import { Skeleton } from '../../components/common/Skeleton';
 import { EmptyState } from '../../components/common/EmptyState';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 export function AdminStatisticsPage() {
   const { data: stats, isLoading } = useQuery({

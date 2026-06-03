@@ -90,7 +90,7 @@ export async function getEvents(params?: Record<string, string | number>): Promi
   return data;
 }
 
-export async function getEvent(id: number): Promise<EventDto> {
+export async function getEvent(id: string): Promise<EventDto> {
   const { data } = await api.get(`/events/${id}`);
   return data;
 }
@@ -100,12 +100,12 @@ export async function createEvent(eventData: Record<string, unknown>) {
   return data;
 }
 
-export async function registerForEvent(eventId: number) {
+export async function registerForEvent(eventId: string) {
   const { data } = await api.post('/registrations', { eventId });
   return data;
 }
 
-export async function cancelRegistration(id: number) {
+export async function cancelRegistration(id: string) {
   const { data } = await api.delete(`/registrations/${id}`);
   return data;
 }
@@ -120,32 +120,37 @@ export async function applyAsOrganizer(formData: Record<string, unknown>) {
   return data;
 }
 
-export async function updateEvent(id: number, eventData: Record<string, unknown>) {
+export async function updateEvent(id: string, eventData: Record<string, unknown>) {
   const { data } = await api.put(`/events/${id}`, eventData);
   return data;
 }
 
-export async function duplicateEvent(id: number, newDate?: string) {
+export async function duplicateEvent(id: string, newDate?: string) {
   const { data } = await api.post(`/events/${id}/duplicate`, { newDate });
   return data;
 }
 
-export async function getEventRegistrations(eventId: number) {
+export async function deleteEvent(id: string) {
+  const { data } = await api.delete(`/events/${id}`);
+  return data;
+}
+
+export async function getEventRegistrations(eventId: string) {
   const { data } = await api.get(`/registrations/event/${eventId}`);
   return data.data || data;
 }
 
-export async function exportEventCSV(eventId: number): Promise<string> {
+export async function exportEventCSV(eventId: string): Promise<string> {
   const { data } = await api.get(`/registrations/event/${eventId}/csv`, { responseType: 'text' });
   return data;
 }
 
-export async function getMessageHistory(eventId: number) {
+export async function getMessageHistory(eventId: string) {
   const { data } = await api.get(`/events/${eventId}/messages`);
   return data.data || data;
 }
 
-export async function sendMessage(eventId: number, text: string) {
+export async function sendMessage(eventId: string, text: string) {
   const { data } = await api.post(`/events/${eventId}/messages`, { text });
   return data;
 }
@@ -155,12 +160,12 @@ export async function getOrganizers(filter?: string) {
   return data.data || data;
 }
 
-export async function approveOrganizer(id: number) {
+export async function approveOrganizer(id: string) {
   const { data } = await api.post(`/admin/organizers/${id}/approve`);
   return data;
 }
 
-export async function rejectOrganizer(id: number) {
+export async function rejectOrganizer(id: string) {
   const { data } = await api.post(`/admin/organizers/${id}/reject`);
   return data;
 }
@@ -170,7 +175,7 @@ export async function getAllStatistics() {
   return data.data || data;
 }
 
-export async function getEventStatistics(id: number) {
+export async function getEventStatistics(id: string) {
   const { data } = await api.get(`/statistics/events/${id}`);
   return data;
 }
@@ -188,11 +193,6 @@ export async function getParticipationReport() {
 export async function getEngagementReport() {
   const { data } = await api.get('/reports/engagement');
   return data.data || data;
-}
-
-export async function logout() {
-  const { data } = await api.post('/auth/logout');
-  return data;
 }
 
 export default api;
