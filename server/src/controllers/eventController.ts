@@ -1,83 +1,71 @@
 import { Request, Response } from 'express';
-import { prisma } from '../app.js';
-import { getEventDetailModel, EventDetail } from '../models/mongodb/EventDetail.js';
+import { Event, Organizer } from '../models/mongodb/index.js';
 import { createEventSchema, updateEventSchema } from '../utils/validation.js';
 import { handleZodError } from '../utils/handleZodError.js';
+import { prisma } from '../app.js';
+
+async function generateUniqueCode(): Promise<string> {
+  const lastEvent = await Event.findOne().sort({ uniqueCode: -1 }).select('uniqueCode').lean();
+  let nextNum = 1;
+  if (lastEvent?.uniqueCode) {
+    const match = lastEvent.uniqueCode.match(/EVT-(\d+)/);
+    if (match) nextNum = parseInt(match[1]) + 1;
+  }
+  return `EVT-${String(nextNum).padStart(3, '0')}`;
+}
 
 export async function listEvents(req: Request, res: Response) {
   try {
     const { type, status, from, to, search, organizerId, page = '1', limit = '12' } = req.query;
     const skip = (Number(page) - 1) * Number(limit);
 
-    const where: string[] = [];
-    const params: (string | number)[] = [];
-    let idx = 1;
+    const filter: Record<string, unknown> = {};
 
     if (type && type !== 'ALL') {
-      where.push(`e.event_type = $${idx++}`);
-      params.push(String(type));
+      filter.eventType = String(type);
     }
-    if (from) {
-      where.push(`e.date >= $${idx++}`);
-      params.push(String(from));
-    }
-    if (to) {
-      where.push(`e.date <= $${idx++}`);
-      params.push(String(to));
+    if (from || to) {
+      filter.date = {};
+      if (from) (filter.date as Record<string, unknown>).$gte = new Date(String(from) + 'T00:00:00');
+      if (to) (filter.date as Record<string, unknown>).$lte = new Date(String(to) + 'T00:00:00');
     }
     if (search) {
-      where.push(`LOWER(e.title) LIKE $${idx++}`);
-      params.push(`%${String(search).toLowerCase()}%`);
+      filter.title = { $regex: String(search), $options: 'i' };
     }
     if (status && status !== 'ALL') {
-      if (status === 'UPCOMING') where.push(`e.date > CURRENT_DATE`);
-      else if (status === 'FINISHED') where.push(`e.date < CURRENT_DATE`);
-      else if (status === 'IN_PROGRESS') where.push(`e.date = CURRENT_DATE`);
+      const today = new Date(new Date().toDateString());
+      if (status === 'UPCOMING') filter.date = { ...(filter.date as object || {}), $gt: today };
+      else if (status === 'FINISHED') filter.date = { ...(filter.date as object || {}), $lt: today };
+      else if (status === 'IN_PROGRESS') filter.date = today;
     }
     if (organizerId) {
-      where.push(`(o.student_id = $${idx++} OR o.employee_id = $${idx++})`);
-      params.push(String(organizerId), String(organizerId));
+      filter['organizer.userId'] = String(organizerId);
     }
 
-    const whereClause = where.length > 0 ? 'WHERE ' + where.join(' AND ') : '';
-    const countResult = await prisma.$queryRawUnsafe<Array<{ count: bigint }>>(
-      `SELECT COUNT(*) FROM public.uniplan_events e ${whereClause}`,
-      ...params,
-    );
-    const total = Number(countResult[0].count);
-
-    const events = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(`
-    SELECT e.*, o.organizer_type, 
-      COALESCE(s.first_name, emp.first_name) as first_name,
-      COALESCE(s.last_name, emp.last_name) as last_name,
-      COALESCE(reg.cnt, 0) as current_registrations
-    FROM public.uniplan_events e
-    JOIN public.uniplan_organizers o ON e.organizer_id = o.id
-    LEFT JOIN public.students s ON o.student_id = s.id
-    LEFT JOIN public.employees emp ON o.employee_id = emp.id
-    LEFT JOIN (
-      SELECT event_id, COUNT(*) as cnt FROM public.uniplan_registrations 
-      WHERE status = 'REGISTERED' GROUP BY event_id
-    ) reg ON reg.event_id = e.id
-    ${whereClause}
-    ORDER BY e.date ASC LIMIT $${idx} OFFSET $${idx + 1}
-  `, ...params, Number(limit), skip);
+    const [events, total] = await Promise.all([
+      Event.find(filter)
+        .sort({ date: 1 })
+        .skip(skip)
+        .limit(Number(limit))
+        .lean(),
+      Event.countDocuments(filter),
+    ]);
 
     res.json({
       data: events.map(e => ({
-        id: e.id,
-        uniqueCode: e.unique_code,
+        id: e._id,
+        uniqueCode: e.uniqueCode,
         title: e.title,
         description: e.description,
-        eventType: e.event_type,
+        eventType: e.eventType,
         date: e.date,
-        startTime: e.start_time,
-        endTime: e.end_time,
+        startTime: e.startTime,
+        endTime: e.endTime,
         location: e.location,
-        maxAttendees: e.max_attendees,
-        currentRegistrations: Number(e.current_registrations),
-        organizerName: `${e.first_name} ${e.last_name}`,
-        status: computeStatus(e.date as string),
+        maxAttendees: e.maxAttendees,
+        currentRegistrations: e.registrations?.filter(r => r.status === 'REGISTERED').length || 0,
+        organizerName: e.organizer?.name || '',
+        status: computeStatus(e.date),
       })),
       total,
       page: Number(page),
@@ -92,47 +80,33 @@ export async function listEvents(req: Request, res: Response) {
 
 export async function getEvent(req: Request, res: Response) {
   try {
-    const id = Number(req.params.id);
-    const events = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(`
-    SELECT e.*, o.organizer_type,
-      COALESCE(s.first_name, emp.first_name) as first_name,
-      COALESCE(s.last_name, emp.last_name) as last_name,
-      COALESCE(reg.cnt, 0) as current_registrations
-    FROM public.uniplan_events e
-    JOIN public.uniplan_organizers o ON e.organizer_id = o.id
-    LEFT JOIN public.students s ON o.student_id = s.id
-    LEFT JOIN public.employees emp ON o.employee_id = emp.id
-    LEFT JOIN (
-      SELECT event_id, COUNT(*) as cnt FROM public.uniplan_registrations 
-      WHERE status = 'REGISTERED' GROUP BY event_id
-    ) reg ON reg.event_id = e.id
-    WHERE e.id = $1
-  `, id);
+    const event = await Event.findById(req.params.id).lean();
 
-    if (!events || events.length === 0) {
+    if (!event) {
       res.status(404).json({ message: 'Event not found', code: 'NOT_FOUND' });
       return;
     }
 
-    const e = events[0];
-    const detail = await EventDetail.findOne({ eventId: id }).lean();
+    const typeFields = extractTypeFields(event);
 
     res.json({
-      id: e.id,
-      uniqueCode: e.unique_code,
-      title: e.title,
-      description: e.description,
-      eventType: e.event_type,
-      date: e.date,
-      startTime: e.start_time,
-      endTime: e.end_time,
-      location: e.location,
-      maxAttendees: e.max_attendees,
-      currentRegistrations: Number(e.current_registrations),
-      organizerId: e.organizer_id,
-      organizerName: `${e.first_name} ${e.last_name}`,
-      status: computeStatus(e.date as string),
-      typeSpecificFields: detail || null,
+      id: event._id,
+      uniqueCode: event.uniqueCode,
+      title: event.title,
+      description: event.description,
+      eventType: event.eventType,
+      date: event.date,
+      startTime: event.startTime,
+      endTime: event.endTime,
+      location: event.location,
+      maxAttendees: event.maxAttendees,
+      currentRegistrations: event.registrations?.filter(r => r.status === 'REGISTERED').length || 0,
+      organizerId: event.organizer?.userId,
+      organizerName: event.organizer?.name,
+      status: computeStatus(event.date),
+      typeSpecificFields: typeFields,
+      messages: event.messages || [],
+      registrations: event.registrations || [],
     });
   } catch (e) {
     console.error('Get event error:', e);
@@ -143,41 +117,65 @@ export async function getEvent(req: Request, res: Response) {
 export async function createEvent(req: Request, res: Response) {
   try {
     const data = createEventSchema.parse(req.body);
-    const organizer = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
-      `SELECT id FROM public.uniplan_organizers WHERE (employee_id = $1 OR student_id = $1) AND is_active = true AND approved_by_admin = true`,
-      req.user!.userId
-    );
-    if (!organizer || organizer.length === 0) {
-      res.status(403).json({ message: 'Not an approved organizer', code: 'FORBIDDEN' });
-      return;
+    const userId = req.user!.userId;
+
+    const organizer = await Organizer.findOne({
+      userId,
+      isActive: true,
+      approvedByAdmin: true,
+    }).lean();
+
+    let organizerData: { userId: string; name: string; type: string };
+
+    if (organizer) {
+      organizerData = { userId: organizer.userId, name: organizer.name, type: organizer.type };
+    } else {
+      const userRow = await prisma.$queryRawUnsafe<Array<{ role: string }>>(
+        `SELECT role FROM public.users WHERE (student_id = $1 OR employee_id = $1) AND is_active = true`, userId
+      );
+      if (!userRow || userRow.length === 0 || userRow[0].role !== 'ADMIN') {
+        res.status(403).json({ message: 'Not an approved organizer', code: 'FORBIDDEN' });
+        return;
+      }
+      const nameRow = await prisma.$queryRawUnsafe<Array<{ first_name: string; last_name: string }>>(
+        `SELECT first_name, last_name FROM public.students WHERE id = $1
+         UNION ALL
+         SELECT first_name, last_name FROM public.employees WHERE id = $1
+         LIMIT 1`, userId
+      );
+      const name = nameRow?.[0] ? `${nameRow[0].first_name} ${nameRow[0].last_name}` : userId;
+      organizerData = { userId, name, type: 'BIENESTAR_STAFF' };
     }
 
-    const codeResult = await prisma.$queryRawUnsafe<Array<{ nextval: bigint }>>("SELECT nextval('public.uniplan_events_id_seq')");
-    const seqId = Number(codeResult[0].nextval);
-    const uniqueCode = `EVT-${String(seqId).padStart(3, '0')}`;
+    const uniqueCode = await generateUniqueCode();
 
-    const detailModel = getEventDetailModel(data.eventType);
-    const detailDoc = await detailModel.create({
-      eventId: seqId,
+    const eventData: Record<string, unknown> = {
+      uniqueCode,
+      title: data.title,
+      description: data.description,
       eventType: data.eventType,
-      ...(data.typeSpecificFields || {}),
-    });
+      date: new Date(data.date + 'T00:00:00'),
+      startTime: data.startTime,
+      endTime: data.endTime,
+      location: data.location,
+      maxAttendees: data.maxAttendees,
+      organizer: organizerData,
+      typeDetails: data.typeSpecificFields || {},
+      registrations: [],
+      messages: [],
+    };
+
+    const event = await Event.create(eventData);
 
     await prisma.$executeRawUnsafe(
-      `INSERT INTO public.uniplan_events (id, unique_code, title, description, event_type, date, start_time, end_time, location, max_attendees, organizer_id, mongodb_detail_id)
-       VALUES ($1, $2, $3, $4, $5, $6::date, $7, $8, $9, $10, $11, $12)`,
-      seqId, uniqueCode, data.title, data.description, data.eventType,
-       data.date, data.startTime, data.endTime,
-        data.location, data.maxAttendees, organizer[0].id, String(detailDoc._id)
+      `INSERT INTO public.uniplan_statistics (event_id, total_registered, total_cancelled, total_attended, demographics)
+       VALUES ($1, 0, 0, 0, $2)
+       ON CONFLICT (event_id) DO NOTHING`,
+      String(event._id),
+      JSON.stringify({ by_faculty: {}, by_program: {}, by_campus: {} }),
     );
 
-    await prisma.$executeRawUnsafe(
-      `INSERT INTO public.uniplan_statistics (event_id, total_registered, total_cancelled, total_attended)
-       VALUES ($1, 0, 0, 0)
-       ON CONFLICT (event_id) DO NOTHING`, seqId
-    );
-
-    res.status(201).json({ id: seqId, uniqueCode });
+    res.status(201).json({ id: String(event._id), uniqueCode });
   } catch (e) {
     if (handleZodError(e, res)) return;
     console.error('Create event error:', e);
@@ -187,56 +185,38 @@ export async function createEvent(req: Request, res: Response) {
 
 export async function updateEvent(req: Request, res: Response) {
   try {
-    const id = Number(req.params.id);
-    const event = await prisma.$queryRawUnsafe<Array<{ organizer_id: number; event_type: string }>>(
-      `SELECT organizer_id, event_type FROM public.uniplan_events WHERE id = $1`, id
-    );
-    if (!event || event.length === 0) {
+    const event = await Event.findById(req.params.id);
+    if (!event) {
       res.status(404).json({ message: 'Event not found', code: 'NOT_FOUND' });
       return;
     }
 
-    const orgCheck = await prisma.$queryRawUnsafe<Array<{ student_id: string | null; employee_id: string | null }>>(
-      `SELECT student_id, employee_id FROM public.uniplan_organizers WHERE id = $1`,
-      event[0].organizer_id
-    );
-    const currentUserId = req.user!.userId;
-    if (orgCheck[0]?.student_id !== currentUserId && orgCheck[0]?.employee_id !== currentUserId) {
+    if (event.organizer.userId !== req.user!.userId) {
       res.status(403).json({ message: 'Not your event', code: 'FORBIDDEN' });
       return;
     }
 
     const data = updateEventSchema.parse(req.body);
 
-    const fieldMap: Record<string, string> = {
-      title: 'title', description: 'description', eventType: 'event_type',
-      date: 'date', startTime: 'start_time', endTime: 'end_time',
-      location: 'location', maxAttendees: 'max_attendees',
-    };
+    const updateData: Record<string, unknown> = {};
 
-    const sets: string[] = [];
-    const values: unknown[] = [];
-    let pIdx = 1;
-
-    for (const [key, col] of Object.entries(fieldMap)) {
-      if ((data as any)[key] !== undefined) {
-        sets.push(`${col} = $${pIdx++}`);
-        values.push((data as any)[key]);
+    const allowedFields = ['title', 'description', 'eventType', 'startTime', 'endTime', 'location', 'maxAttendees'];
+    for (const field of allowedFields) {
+      if ((data as any)[field] !== undefined) {
+        updateData[field] = (data as any)[field];
       }
     }
 
-    if (sets.length > 0) {
-      sets.push(`updated_at = NOW()`);
-      values.push(id);
-      await prisma.$executeRawUnsafe(
-        `UPDATE public.uniplan_events SET ${sets.join(', ')} WHERE id = $${pIdx}`,
-        ...values,
-      );
+    if (data.date !== undefined) {
+      updateData.date = new Date(data.date + 'T00:00:00');
     }
 
     if (data.typeSpecificFields) {
-      const detailModel = getEventDetailModel(data.eventType || event[0].event_type);
-      await detailModel.findOneAndUpdate({ eventId: id }, data.typeSpecificFields, { upsert: true });
+      updateData.typeDetails = { ...event.typeDetails, ...data.typeSpecificFields };
+    }
+
+    if (Object.keys(updateData).length > 0) {
+      await Event.findByIdAndUpdate(req.params.id, updateData);
     }
 
     res.json({ message: 'Event updated' });
@@ -249,47 +229,61 @@ export async function updateEvent(req: Request, res: Response) {
 
 export async function duplicateEvent(req: Request, res: Response) {
   try {
-    const id = Number(req.params.id);
     const { newDate } = req.body;
+    const original = await Event.findById(req.params.id).lean();
 
-    const [original, oldDetail] = await Promise.all([
-      prisma.$queryRawUnsafe<Array<any>>(
-        `SELECT * FROM public.uniplan_events WHERE id = $1`, id
-      ),
-      EventDetail.findOne({ eventId: id }).lean()
-    ]);
-    if (!original || original.length === 0) {
+    if (!original) {
       res.status(404).json({ message: 'Event not found', code: 'NOT_FOUND' });
       return;
     }
 
-    const o = original[0];
-    const seqId = Number((await prisma.$queryRawUnsafe<Array<{ nextval: bigint }>>("SELECT nextval('public.uniplan_events_id_seq')"))[0].nextval);
-    const uniqueCode = `EVT-${String(seqId).padStart(3, '0')}`;
-    const newDetailData = { ...oldDetail, eventId: seqId } as any;
-    delete newDetailData._id;
-    delete newDetailData.__v;
-    delete newDetailData.createdAt;
-    delete newDetailData.updatedAt;
+    const uniqueCode = await generateUniqueCode();
 
-    const detailModel = getEventDetailModel(o.event_type);
-    const newDetail = await detailModel.create(newDetailData);
-
-    await prisma.$executeRawUnsafe(
-      `INSERT INTO public.uniplan_events (id, unique_code, title, description, event_type, date, start_time, end_time, location, max_attendees, organizer_id, mongodb_detail_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-      seqId, uniqueCode, o.title, o.description, o.event_type,
-      newDate || o.date, o.start_time, o.end_time, o.location, o.max_attendees,
-      o.organizer_id, String(newDetail._id)
-    );
+    const newEvent = await Event.create({
+      uniqueCode,
+      title: original.title,
+      description: original.description,
+      eventType: original.eventType,
+      date: newDate ? new Date(newDate + 'T00:00:00') : original.date,
+      startTime: original.startTime,
+      endTime: original.endTime,
+      location: original.location,
+      maxAttendees: original.maxAttendees,
+      organizer: original.organizer,
+      typeDetails: original.typeDetails,
+      registrations: [],
+      messages: [],
+    });
 
     await prisma.$executeRawUnsafe(
-      `INSERT INTO public.uniplan_statistics (event_id) VALUES ($1)`, seqId
+      `INSERT INTO public.uniplan_statistics (event_id, total_registered, total_cancelled, total_attended, demographics)
+       VALUES ($1, 0, 0, 0, $2)`,
+      String(newEvent._id),
+      JSON.stringify({ by_faculty: {}, by_program: {}, by_campus: {} }),
     );
 
-    res.status(201).json({ id: seqId, uniqueCode });
+    res.status(201).json({ id: String(newEvent._id), uniqueCode });
   } catch (e) {
     console.error('Duplicate event error:', e);
+    res.status(500).json({ message: 'Internal server error', code: 'INTERNAL_ERROR' });
+  }
+}
+
+export async function deleteEvent(req: Request, res: Response) {
+  try {
+    const event = await Event.findByIdAndDelete(req.params.id);
+    if (!event) {
+      res.status(404).json({ message: 'Event not found', code: 'NOT_FOUND' });
+      return;
+    }
+
+    await prisma.$executeRawUnsafe(
+      `DELETE FROM public.uniplan_statistics WHERE event_id = $1`, String(event._id)
+    );
+
+    res.json({ message: 'Event deleted', id: String(event._id) });
+  } catch (e) {
+    console.error('Delete event error:', e);
     res.status(500).json({ message: 'Internal server error', code: 'INTERNAL_ERROR' });
   }
 }
@@ -306,4 +300,29 @@ function computeStatus(date: unknown): string {
   if (eventDate > today) return 'UPCOMING';
   if (eventDate < today) return 'FINISHED';
   return 'IN_PROGRESS';
+}
+
+const TYPE_SPECIFIC_FIELDS: Record<string, string[]> = {
+  WORKSHOP: ['materials', 'prerequisiteSubjectCode', 'prerequisiteSemester'],
+  TALK: ['speakerName', 'speakerProfile', 'speakerAffiliation', 'relatedLinks', 'extendedDescription'],
+  SPORTS_TOURNAMENT: ['sportType', 'rules', 'playersPerTeam', 'tournamentStructure'],
+  VOLUNTEERING: ['cause', 'hoursRequired', 'activities', 'meetingPoints', 'responsiblePersons'],
+  OTHER: ['additionalInfo'],
+};
+
+function extractTypeFields(event: Record<string, unknown>): Record<string, unknown> {
+  const type = event.eventType as string;
+  const knownFields = TYPE_SPECIFIC_FIELDS[type] || [];
+  const typeDetails = (event.typeDetails as Record<string, unknown>) || {};
+  const result: Record<string, unknown> = {};
+
+  for (const field of knownFields) {
+    if (field in typeDetails) {
+      result[field] = typeDetails[field];
+    } else if (field in event) {
+      result[field] = event[field];
+    }
+  }
+
+  return result;
 }

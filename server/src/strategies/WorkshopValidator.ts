@@ -1,23 +1,23 @@
 import { prisma } from '../app.js';
 import { BaseValidator } from './BaseValidator.js';
 import { ValidationResult } from './IRegistrationValidator.js';
-import { EventDetail } from '../models/mongodb/EventDetail.js';
-import { EventType } from '@uniplan/shared';
+import { Event } from '../models/mongodb/index.js';
 
 export class WorkshopValidator extends BaseValidator {
-  protected async additionalChecks(studentId: string, eventId: number): Promise<ValidationResult> {
-    // Get the prerequisite from MongoDB
-    const detail = await EventDetail.findOne({ eventId, eventType: EventType.WORKSHOP }).lean() as any;
-    const prereqSubject = detail?.prerequisiteSubjectCode;
-    const prereqSemester = detail?.prerequisiteSemester;
+  protected async additionalChecks(studentId: string, eventId: string): Promise<ValidationResult> {
+    const event = await Event.findById(eventId).lean() as any;
+    if (!event) return { valid: false, reason: 'Event not found' };
+
+    const typeDetails = event.typeDetails || {};
+    const prereqSubject = typeDetails.prerequisiteSubjectCode;
+    const prereqSemester = typeDetails.prerequisiteSemester;
 
     if (prereqSubject) {
-      // Check if student has completed or is enrolled in the prerequisite subject
       const enrollments = await prisma.$queryRawUnsafe<Array<{ subject_code: string }>>(
         `SELECT g.subject_code FROM public.enrollments e
          JOIN public.groups g ON e.nrc = g.nrc
          WHERE e.student_id = $1 AND g.subject_code = $2 AND e.status IN ('Active', 'Passed')`,
-        studentId, prereqSubject
+        studentId, prereqSubject,
       );
       if (!enrollments || enrollments.length === 0) {
         return { valid: false, reason: `Prerequisite course ${prereqSubject} not completed` };
@@ -40,7 +40,7 @@ export class WorkshopValidator extends BaseValidator {
        JOIN public.groups g ON e.nrc = g.nrc
        WHERE e.student_id = $1 AND e.status = 'Active'
        ORDER BY g.semester DESC LIMIT 1`,
-      studentId
+      studentId,
     );
     if (result && result.length > 0) {
       const sem = result[0].semester;

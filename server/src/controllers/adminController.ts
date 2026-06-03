@@ -1,23 +1,47 @@
 import { Request, Response } from 'express';
+import { Organizer } from '../models/mongodb/index.js';
 import { prisma } from '../app.js';
 
 export async function listOrganizers(req: Request, res: Response) {
   try {
     const filter = req.query.filter as string || 'pending';
 
-    const organizers = await prisma.$queryRawUnsafe<Array<any>>(
-      `SELECT o.*, 
-         COALESCE(s.first_name, e.first_name) as first_name,
-         COALESCE(s.last_name, e.last_name) as last_name,
-         COALESCE(s.email, e.email) as email
-       FROM public.uniplan_organizers o
-       LEFT JOIN public.students s ON o.student_id = s.id
-       LEFT JOIN public.employees e ON o.employee_id = e.id
-       WHERE ($1 = 'all' OR ($1 = 'pending' AND o.approved_by_admin = false) OR ($1 = 'approved' AND o.approved_by_admin = true))
-       ORDER BY o.created_at DESC`,
-      filter
-    );
-    res.json({ data: organizers });
+    let query: Record<string, unknown> = {};
+    if (filter === 'pending') {
+      query = { approvedByAdmin: false, isActive: true };
+    } else if (filter === 'approved') {
+      query = { approvedByAdmin: true };
+    }
+
+    const organizers = await Organizer.find(query).sort({ createdAt: -1 }).lean();
+
+    const mapped = organizers.map(o => ({
+      id: o._id,
+      userId: o.userId,
+      employeeId: o.type === 'PROFESSOR' ? o.userId : null,
+      studentId: o.type === 'STUDENT_LEADER' ? o.userId : null,
+      name: o.name,
+      email: o.email,
+      organizerType: o.type,
+      organizer_type: o.type,
+      first_name: o.name.split(' ')[0] || '',
+      last_name: o.name.split(' ').slice(1).join(' ') || '',
+      isActive: o.isActive,
+      is_active: o.isActive,
+      approvedByAdmin: o.approvedByAdmin,
+      approved_by_admin: o.approvedByAdmin,
+      department: o.profile?.department,
+      specialization: o.profile?.specialization,
+      semester: o.profile?.semester,
+      studentGroup: o.profile?.studentGroup,
+      student_group: o.profile?.studentGroup,
+      adminArea: o.profile?.adminArea,
+      admin_area: o.profile?.adminArea,
+      positionTitle: o.profile?.positionTitle,
+      position_title: o.profile?.positionTitle,
+    }));
+
+    res.json({ data: mapped });
   } catch (e) {
     console.error('ListOrganizers error:', e);
     res.status(500).json({ message: 'Internal server error', code: 'INTERNAL_ERROR' });
@@ -26,27 +50,25 @@ export async function listOrganizers(req: Request, res: Response) {
 
 export async function approveOrganizer(req: Request, res: Response) {
   try {
-    const id = Number(req.params.id);
+    const id = req.params.id;
 
-    const org = await prisma.$queryRawUnsafe<Array<{ student_id: string | null; employee_id: string | null }>>(
-      `SELECT student_id, employee_id FROM public.uniplan_organizers WHERE id = $1`, id
-    );
-    if (!org || org.length === 0) {
+    const org = await Organizer.findById(id);
+    if (!org) {
       res.status(404).json({ message: 'Organizer not found', code: 'NOT_FOUND' });
       return;
     }
 
-    const userId = org[0].student_id || org[0].employee_id;
+    const userId = org.userId;
     if (userId) {
       await prisma.$executeRawUnsafe(
-        `UPDATE public.users SET role = 'ORGANIZER' WHERE (student_id = $1 OR employee_id = $1) AND is_active = true`,
-        userId
+        `UPDATE public.users SET role = 'ORGANIZER' WHERE (student_id = $1 OR employee_id = $1) AND is_active = true AND role = 'STUDENT'`,
+        userId,
       );
     }
 
-    await prisma.$executeRawUnsafe(
-      `UPDATE public.uniplan_organizers SET approved_by_admin = true WHERE id = $1`, id
-    );
+    org.approvedByAdmin = true;
+    await org.save();
+
     res.json({ message: 'Organizer approved' });
   } catch (e) {
     console.error('ApproveOrganizer error:', e);
@@ -56,19 +78,18 @@ export async function approveOrganizer(req: Request, res: Response) {
 
 export async function rejectOrganizer(req: Request, res: Response) {
   try {
-    const id = Number(req.params.id);
+    const id = req.params.id;
 
-    const org = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
-      `SELECT id FROM public.uniplan_organizers WHERE id = $1`, id
-    );
-    if (!org || org.length === 0) {
+    const org = await Organizer.findById(id);
+    if (!org) {
       res.status(404).json({ message: 'Organizer not found', code: 'NOT_FOUND' });
       return;
     }
 
-    await prisma.$executeRawUnsafe(
-      `UPDATE public.uniplan_organizers SET is_active = false, approved_by_admin = false WHERE id = $1`, id
-    );
+    org.isActive = false;
+    org.approvedByAdmin = false;
+    await org.save();
+
     res.json({ message: 'Organizer rejected' });
   } catch (e) {
     console.error('RejectOrganizer error:', e);

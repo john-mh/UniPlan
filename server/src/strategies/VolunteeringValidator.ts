@@ -1,27 +1,28 @@
-import { prisma } from '../app.js';
 import { BaseValidator } from './BaseValidator.js';
 import { ValidationResult } from './IRegistrationValidator.js';
-import { EventDetail } from '../models/mongodb/EventDetail.js';
+import { Event } from '../models/mongodb/index.js';
 import { EventType, RegistrationStatus } from '@uniplan/shared';
 
 export class VolunteeringValidator extends BaseValidator {
-  protected async additionalChecks(studentId: string, eventId: number): Promise<ValidationResult> {
-    const detail = await EventDetail.findOne({ eventId, eventType: EventType.VOLUNTEERING }).lean() as any;
-    const hoursRequired = detail?.hoursRequired;
+  protected async additionalChecks(studentId: string, eventId: string): Promise<ValidationResult> {
+    const event = await Event.findById(eventId).lean() as any;
+    if (!event) return { valid: false, reason: 'Event not found' };
+
+    const typeDetails = event.typeDetails || {};
+    const hoursRequired = typeDetails.hoursRequired;
     if (!hoursRequired) return { valid: true };
 
-    const pastRegistrations = await prisma.$queryRawUnsafe<Array<{ event_id: number }>>(
-      `SELECT r.event_id FROM public.uniplan_registrations r
-       JOIN public.uniplan_events e ON r.event_id = e.id
-       WHERE r.student_id = $1 AND r.status = $2 AND e.event_type = $3`,
-      studentId, RegistrationStatus.REGISTERED, EventType.VOLUNTEERING
-    );
+    const pastEvents = await Event.find({
+      eventType: EventType.VOLUNTEERING,
+      'registrations.studentId': studentId,
+      'registrations.status': RegistrationStatus.REGISTERED,
+    }).lean();
 
     let totalHours = 0;
-    for (const reg of pastRegistrations) {
-      const volDetail = await EventDetail.findOne({ eventId: reg.event_id, eventType: EventType.VOLUNTEERING }).lean() as any;
-      if (volDetail?.hoursRequired) {
-        totalHours += Number(volDetail.hoursRequired);
+    for (const e of pastEvents) {
+      const td = e.typeDetails as any;
+      if (td?.hoursRequired) {
+        totalHours += Number(td.hoursRequired);
       }
     }
 

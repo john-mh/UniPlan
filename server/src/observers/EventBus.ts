@@ -8,7 +8,7 @@ export enum EventTopic {
 
 export interface RegistrationEvent {
   studentId: string;
-  eventId: number;
+  eventId: string;
   previousStatus?: string;
   newStatus: string;
 }

@@ -1,7 +1,26 @@
 import { Request, Response } from 'express';
 import { prisma } from '../app.js';
+import { Organizer } from '../models/mongodb/index.js';
 import { applyOrganizerSchema } from '../utils/validation.js';
 import { handleZodError } from '../utils/handleZodError.js';
+
+async function resolveUserName(userId: string): Promise<{ name: string; email: string }> {
+  const student = await prisma.$queryRawUnsafe<Array<{ first_name: string; last_name: string; email: string }>>(
+    `SELECT first_name, last_name, email FROM public.students WHERE id = $1`, userId,
+  );
+  if (student.length > 0) {
+    return { name: `${student[0].first_name} ${student[0].last_name}`, email: student[0].email };
+  }
+
+  const emp = await prisma.$queryRawUnsafe<Array<{ first_name: string; last_name: string; email: string }>>(
+    `SELECT first_name, last_name, email FROM public.employees WHERE id = $1`, userId,
+  );
+  if (emp.length > 0) {
+    return { name: `${emp[0].first_name} ${emp[0].last_name}`, email: emp[0].email };
+  }
+
+  return { name: userId, email: '' };
+}
 
 export async function applyAsOrganizer(req: Request, res: Response) {
   try {
@@ -9,10 +28,10 @@ export async function applyAsOrganizer(req: Request, res: Response) {
     const userId = req.user!.userId;
 
     const isStudent = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
-      `SELECT id FROM public.students WHERE id = $1`, userId
+      `SELECT id FROM public.students WHERE id = $1`, userId,
     );
     const isEmployee = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
-      `SELECT id FROM public.employees WHERE id = $1`, userId
+      `SELECT id FROM public.employees WHERE id = $1`, userId,
     );
 
     if (isStudent.length === 0 && isEmployee.length === 0) {
@@ -20,28 +39,30 @@ export async function applyAsOrganizer(req: Request, res: Response) {
       return;
     }
 
-    // Check if already applied
-    const existing = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
-      `SELECT id FROM public.uniplan_organizers WHERE employee_id = $1 OR student_id = $1`, userId
-    );
-    if (existing && existing.length > 0) {
+    const existing = await Organizer.findOne({ userId });
+    if (existing) {
       res.status(409).json({ message: 'You have already applied', code: 'DUPLICATE_APPLICATION' });
       return;
     }
 
-    await prisma.$executeRawUnsafe(
-      `INSERT INTO public.uniplan_organizers (employee_id, student_id, organizer_type, department, specialization, semester, student_group, admin_area, position_title, approved_by_admin)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, false)`,
-      isEmployee.length > 0 ? userId : null,
-      isStudent.length > 0 ? userId : null,
-      data.organizerType,
-      data.department || null,
-      data.specialization || null,
-      data.semester || null,
-      data.studentGroup || null,
-      data.adminArea || null,
-      data.positionTitle || null
-    );
+    const { name, email } = await resolveUserName(userId);
+
+    await Organizer.create({
+      userId,
+      name,
+      email,
+      type: data.organizerType,
+      approvedByAdmin: false,
+      isActive: true,
+      profile: {
+        department: data.department || undefined,
+        specialization: data.specialization || undefined,
+        semester: data.semester || undefined,
+        studentGroup: data.studentGroup || undefined,
+        adminArea: data.adminArea || undefined,
+        positionTitle: data.positionTitle || undefined,
+      },
+    });
 
     res.status(201).json({ message: 'Application submitted for review' });
   } catch (e) {
@@ -53,15 +74,35 @@ export async function applyAsOrganizer(req: Request, res: Response) {
 
 export async function getOrganizer(req: Request, res: Response) {
   try {
-    const id = Number(req.params.id);
-    const organizer = await prisma.$queryRawUnsafe<Array<any>>(
-      `SELECT o.* FROM public.uniplan_organizers o WHERE o.id = $1`, id
-    );
-    if (!organizer || organizer.length === 0) {
+    const organizer = await Organizer.findById(req.params.id).lean();
+    if (!organizer) {
       res.status(404).json({ message: 'Organizer not found', code: 'NOT_FOUND' });
       return;
     }
-    res.json(organizer[0]);
+
+    res.json({
+      id: organizer._id,
+      userId: organizer.userId,
+      employeeId: organizer.type === 'PROFESSOR' ? organizer.userId : null,
+      studentId: organizer.type === 'STUDENT_LEADER' ? organizer.userId : null,
+      name: organizer.name,
+      email: organizer.email,
+      organizerType: organizer.type,
+      organizer_type: organizer.type,
+      isActive: organizer.isActive,
+      is_active: organizer.isActive,
+      approvedByAdmin: organizer.approvedByAdmin,
+      approved_by_admin: organizer.approvedByAdmin,
+      department: organizer.profile?.department,
+      specialization: organizer.profile?.specialization,
+      semester: organizer.profile?.semester,
+      studentGroup: organizer.profile?.studentGroup,
+      student_group: organizer.profile?.studentGroup,
+      adminArea: organizer.profile?.adminArea,
+      admin_area: organizer.profile?.adminArea,
+      positionTitle: organizer.profile?.positionTitle,
+      position_title: organizer.profile?.positionTitle,
+    });
   } catch (e) {
     console.error('GetOrganizer error:', e);
     res.status(500).json({ message: 'Internal server error', code: 'INTERNAL_ERROR' });

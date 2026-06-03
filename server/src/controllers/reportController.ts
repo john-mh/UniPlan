@@ -1,17 +1,53 @@
 import { Request, Response } from 'express';
-import { prisma } from '../app.js';
+import { Event } from '../models/mongodb/index.js';
 import { RegistrationStatus } from '@uniplan/shared';
 
 export async function occupancyReport(req: Request, res: Response) {
   try {
-    const report = await prisma.$queryRawUnsafe<Array<any>>(
-      `SELECT e.event_type as "eventType", COUNT(*)::int as "totalEvents",
-              ROUND(AVG(CASE WHEN e.max_attendees > 0 THEN COALESCE(s.total_registered, 0)::numeric / e.max_attendees * 100 ELSE 0 END), 1) as "avgOccupancy"
-       FROM public.uniplan_events e
-       LEFT JOIN public.uniplan_statistics s ON e.id = s.event_id
-       GROUP BY e.event_type
-       ORDER BY "avgOccupancy" DESC`
-    );
+    const report = await Event.aggregate([
+      {
+        $group: {
+          _id: '$eventType',
+          totalEvents: { $sum: 1 },
+          avgOccupancy: {
+            $avg: {
+              $cond: [
+                { $gt: ['$maxAttendees', 0] },
+                {
+                  $multiply: [
+                    {
+                      $divide: [
+                        {
+                          $size: {
+                            $filter: {
+                              input: '$registrations',
+                              cond: { $eq: ['$$this.status', RegistrationStatus.REGISTERED] },
+                            },
+                          },
+                        },
+                        '$maxAttendees',
+                      ],
+                    },
+                    100,
+                  ],
+                },
+                0,
+              ],
+            },
+          },
+        },
+      },
+      { $sort: { avgOccupancy: -1 } },
+      {
+        $project: {
+          eventType: '$_id',
+          totalEvents: 1,
+          avgOccupancy: { $round: ['$avgOccupancy', 1] },
+          _id: 0,
+        },
+      },
+    ]);
+
     res.json({ data: report });
   } catch (e) {
     console.error('OccupancyReport error:', e);
@@ -21,33 +57,47 @@ export async function occupancyReport(req: Request, res: Response) {
 
 export async function engagementReport(req: Request, res: Response) {
   try {
-    const bySemester = await prisma.$queryRawUnsafe<Array<any>>(
-      `SELECT g.semester, COUNT(DISTINCT r.student_id)::int as "studentCount"
-       FROM public.uniplan_registrations r
-       JOIN public.enrollments e ON r.student_id = e.student_id
-       JOIN public.groups g ON e.nrc = g.nrc
-       WHERE r.status = $1 AND e.status = 'Active'
-       GROUP BY g.semester
-       ORDER BY g.semester`,
-       RegistrationStatus.REGISTERED
-    );
+    const events = await Event.find({
+      'registrations.status': RegistrationStatus.REGISTERED,
+    }).lean();
 
-    const byFaculty = await prisma.$queryRawUnsafe<Array<any>>(
-      `SELECT fa.name as faculty, COUNT(DISTINCT r.student_id)::int as "studentCount"
-       FROM public.uniplan_registrations r
-       JOIN public.enrollments enr ON r.student_id = enr.student_id AND enr.status = 'Active'
-       JOIN public.groups g ON enr.nrc = g.nrc
-       JOIN public.subjects sub ON g.subject_code = sub.code
-       JOIN public.programs p ON sub.program_code = p.code
-       JOIN public.areas a ON p.area_code = a.code
-       JOIN public.faculties fa ON a.faculty_code = fa.code
-       WHERE r.status = $1
-       GROUP BY fa.name
-       ORDER BY "studentCount" DESC`,
-      RegistrationStatus.REGISTERED
-    );
+    const facultyCount: Record<string, number> = {};
+    const programCount: Record<string, number> = {};
+    const campusCount: Record<string, number> = {};
+    const studentSet = new Set<string>();
 
-    res.json({ data: { bySemester, byFaculty } });
+    for (const event of events) {
+      for (const reg of event.registrations || []) {
+        if (reg.status === RegistrationStatus.REGISTERED) {
+          studentSet.add(reg.studentId);
+          if (reg.faculty) facultyCount[reg.faculty] = (facultyCount[reg.faculty] || 0) + 1;
+          if (reg.program) programCount[reg.program] = (programCount[reg.program] || 0) + 1;
+          if (reg.campus) campusCount[reg.campus] = (campusCount[reg.campus] || 0) + 1;
+        }
+      }
+    }
+
+    const byFaculty = Object.entries(facultyCount)
+      .map(([faculty, count]) => ({ faculty, studentCount: count }))
+      .sort((a, b) => b.studentCount - a.studentCount);
+
+    const byProgram = Object.entries(programCount)
+      .map(([program, count]) => ({ program, studentCount: count }))
+      .sort((a, b) => b.studentCount - a.studentCount);
+
+    const byCampus = Object.entries(campusCount)
+      .map(([campus, count]) => ({ campus, studentCount: count }))
+      .sort((a, b) => b.studentCount - a.studentCount);
+
+    res.json({
+      data: {
+        byFaculty,
+        byProgram,
+        byCampus,
+        bySemester: [],
+        totalUniqueStudents: studentSet.size,
+      },
+    });
   } catch (e) {
     console.error('EngagementReport error:', e);
     res.status(500).json({ message: 'Internal server error', code: 'INTERNAL_ERROR' });
@@ -56,28 +106,74 @@ export async function engagementReport(req: Request, res: Response) {
 
 export async function participationReport(req: Request, res: Response) {
   try {
-    const topStudents = await prisma.$queryRawUnsafe<Array<any>>(
-      `SELECT s.id as "studentId", s.first_name as "firstName", s.last_name as "lastName",
-              s.email, COUNT(r.id)::int as "eventCount"
-       FROM public.students s
-       JOIN public.uniplan_registrations r ON s.id = r.student_id
-       WHERE r.status IN ($1, $2)
-       GROUP BY s.id, s.first_name, s.last_name, s.email
-       ORDER BY "eventCount" DESC
-       LIMIT 10`,
-       RegistrationStatus.REGISTERED, RegistrationStatus.ATTENDED
-    );
+    const byEventTypeResult = await Event.aggregate([
+      { $unwind: '$registrations' },
+      {
+        $match: {
+          'registrations.status': {
+            $in: [RegistrationStatus.REGISTERED, RegistrationStatus.ATTENDED],
+          },
+        },
+      },
+      {
+        $group: {
+          _id: '$eventType',
+          count: { $sum: 1 },
+        },
+      },
+      {
+        $project: {
+          eventType: '$_id',
+          count: 1,
+          _id: 0,
+        },
+      },
+    ]);
 
-    const byEventType = await prisma.$queryRawUnsafe<Array<any>>(
-      `SELECT e.event_type as "eventType", COUNT(r.id)::int as "count"
-       FROM public.uniplan_registrations r
-       JOIN public.uniplan_events e ON r.event_id = e.id
-       WHERE r.status IN ($1, $2)
-       GROUP BY e.event_type`,
-       RegistrationStatus.REGISTERED, RegistrationStatus.ATTENDED
-    );
+    const topStudentsResult = await Event.aggregate([
+      { $unwind: '$registrations' },
+      {
+        $match: {
+          'registrations.status': {
+            $in: [RegistrationStatus.REGISTERED, RegistrationStatus.ATTENDED],
+          },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            studentId: '$registrations.studentId',
+            studentName: '$registrations.studentName',
+          },
+          eventCount: { $sum: 1 },
+        },
+      },
+      { $sort: { eventCount: -1 } },
+      { $limit: 10 },
+      {
+        $project: {
+          studentId: '$_id.studentId',
+          firstName: { $arrayElemAt: [{ $split: ['$_id.studentName', ' '] }, 0] },
+          lastName: {
+            $reduce: {
+              input: { $slice: [{ $split: ['$_id.studentName', ' '] }, 1, { $size: { $split: ['$_id.studentName', ' '] } }] },
+              initialValue: '',
+              in: { $concat: ['$$value', { $cond: [{ $eq: ['$$value', ''] }, '', ' '] }, '$$this'] },
+            },
+          },
+          email: '',
+          eventCount: 1,
+          _id: 0,
+        },
+      },
+    ]);
 
-    res.json({ data: { topStudents, byEventType } });
+    res.json({
+      data: {
+        topStudents: topStudentsResult,
+        byEventType: byEventTypeResult,
+      },
+    });
   } catch (e) {
     console.error('ParticipationReport error:', e);
     res.status(500).json({ message: 'Internal server error', code: 'INTERNAL_ERROR' });

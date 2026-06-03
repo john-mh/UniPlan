@@ -43,6 +43,7 @@ const writeLimiter = rateLimit({
   max: 50,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.method === 'GET',
 });
 app.use('/api/events', writeLimiter);
 app.use('/api/registrations', writeLimiter);
@@ -80,8 +81,14 @@ async function start() {
     await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/uniplan');
     console.log('Connected to MongoDB');
   } catch (e) {
-    console.error('MongoDB connection failed:', (e as Error).message);
-    process.exit(1);
+    console.warn('MongoDB auth failed, trying without credentials...');
+    try {
+      await mongoose.connect('mongodb://localhost:27017/uniplan');
+      console.log('Connected to MongoDB (unauthenticated)');
+    } catch (e2) {
+      console.error('MongoDB connection failed:', (e2 as Error).message);
+      process.exit(1);
+    }
   }
 
   app.listen(PORT, () => {
