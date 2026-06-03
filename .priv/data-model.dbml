@@ -1,0 +1,259 @@
+// UniPlan — Complete Data Model
+// MongoDB (application data) + PostgreSQL (institutional + stats)
+// Generated 2026-06-02
+
+// ═══════════════════════════════════════════════════════════════
+//  M O N G O D B   —   Application Primary
+// ═══════════════════════════════════════════════════════════════
+
+Table events [note: 'Document store — embedded registrations, messages, typeDetails'] {
+  _id ObjectId [pk]
+  uniqueCode varchar(24) [unique, note: 'EVT-061']
+  title varchar(100) [not null]
+  description text [not null]
+  eventType varchar(30) [not null, note: 'WORKSHOP | TALK | SPORTS | VOLUNTEERING | OTHER']
+  date date [not null]
+  startTime varchar(5) [not null, note: 'HH:MM']
+  endTime varchar(5) [not null, note: 'HH:MM']
+  location varchar(100) [not null]
+  maxAttendees integer [not null]
+  status varchar(20) [not null, note: 'UPCOMING | IN_PROGRESS | FINISHED']
+  organizer jsonb [not null, note: 'Embedded: { userId, name, type }']
+  typeDetails jsonb [not null, note: 'Discriminated by eventType. Embedded registrations[] and messages[]']
+  createdAt timestamp [not null]
+  updatedAt timestamp [not null]
+
+  indexes {
+    uniqueCode [unique]
+    eventType
+    date
+    status
+  }
+}
+
+Table organizers [note: 'Organizer profiles — linked to PostgreSQL users'] {
+  _id ObjectId [pk]
+  userId varchar(15) [unique, not null]
+  name varchar(100) [not null]
+  email varchar(100) [not null]
+  type varchar(20) [not null, note: 'PROFESSOR | STUDENT_LEADER | BIENESTAR_STAFF']
+  profile jsonb [note: '{ semester, department, specialization, adminArea, ... }']
+  approvedByAdmin boolean [not null, default: false]
+  isActive boolean [not null, default: true]
+  createdAt timestamp [not null]
+  updatedAt timestamp [not null]
+
+  indexes {
+    approvedByAdmin
+    isActive
+    type
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  P O S T G R E S Q L   —   App Tables
+// ═══════════════════════════════════════════════════════════════
+
+Table users {
+  username varchar(30) [pk]
+  password_hash varchar(100) [not null]
+  role varchar(20) [not null, note: 'STUDENT | ORGANIZER | ADMIN']
+  student_id varchar(15)
+  employee_id varchar(15)
+  is_active boolean [not null, default: true]
+  created_at timestamp [not null, default: `now()`]
+
+  Note: 'Only app-writable institutional table. FK to students XOR employees enforced by CHECK constraint.'
+}
+
+Table uniplan_statistics [note: 'Aggregated metrics + demographic breakdowns'] {
+  id serial [pk]
+  event_id varchar(24) [unique, not null]
+  total_registered integer [not null, default: 0]
+  total_cancelled integer [not null, default: 0]
+  total_attended integer [not null, default: 0]
+  demographics jsonb [not null, default: '{"by_faculty":{},"by_program":{},"by_campus":{}}']
+  last_updated timestamp [not null, default: `now()`]
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  P O S T G R E S Q L   —   Institutional (Read-Only)
+// ═══════════════════════════════════════════════════════════════
+
+Table students {
+  id varchar(15) [pk, note: 'e.g. A00123456']
+  first_name varchar(30) [not null]
+  last_name varchar(30) [not null]
+  email varchar(50) [not null]
+  birth_date date [not null]
+  birth_place_code integer [not null]
+  campus_code integer [not null]
+}
+
+Table employees {
+  id varchar(15) [pk]
+  first_name varchar(30) [not null]
+  last_name varchar(30) [not null]
+  email varchar(30) [not null]
+  contract_type varchar(30) [not null]
+  employee_type varchar(30) [not null]
+  faculty_code integer [not null]
+  campus_code integer [not null]
+  birth_place_code integer [not null]
+}
+
+Table enrollments [note: 'Many-to-many: students ↔ groups'] {
+  student_id varchar(15) [not null]
+  NRC varchar(10) [not null]
+  enrollment_date date [not null]
+  status varchar(15) [not null, note: 'Active | Passed | Failed | Withdrawn']
+}
+
+Table groups {
+  NRC varchar(10) [pk]
+  number integer [not null]
+  semester varchar(6) [not null]
+  subject_code varchar(10) [not null]
+  professor_id varchar(15) [not null]
+}
+
+Table subjects {
+  code varchar(10) [pk]
+  name varchar(30) [not null]
+  program_code integer [not null]
+}
+
+Table programs {
+  code integer [pk]
+  name varchar(40) [not null]
+  area_code integer [not null]
+}
+
+Table areas {
+  code integer [pk]
+  name varchar(20) [not null]
+  faculty_code integer [not null]
+  coordinator_id varchar(15) [not null]
+}
+
+Table faculties {
+  code integer [pk]
+  name varchar(40) [not null]
+  location varchar(15) [not null]
+  phone_number varchar(15) [not null]
+  dean_id varchar(15)
+}
+
+Table campuses {
+  code integer [pk]
+  name varchar(20)
+  city_code integer [not null]
+}
+
+Table cities {
+  code integer [pk]
+  name varchar(20) [not null]
+  dept_code integer [not null]
+}
+
+Table departments {
+  code integer [pk]
+  name varchar(20) [not null]
+  country_code integer [not null]
+}
+
+Table countries {
+  code integer [pk]
+  name varchar(20) [not null]
+}
+
+Table contract_types {
+  name varchar(30) [pk]
+}
+
+Table employee_types {
+  name varchar(30) [pk]
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Relationships
+// ═══════════════════════════════════════════════════════════════
+
+// ── Cross-DB: MongoDB ↔ PostgreSQL ──
+
+Ref "organizer identity (student)": organizers.userId > users.student_id
+Ref "organizer identity (employee)": organizers.userId > users.employee_id
+Ref "event metrics": uniplan_statistics.event_id > events._id
+
+// ── Auth: users → institutional identity ──
+
+Ref "authenticates student": users.student_id > students.id
+Ref "authenticates employee": users.employee_id > employees.id
+
+// ── Academic: enrollment chain ──
+
+Ref "enrolled in": enrollments.student_id > students.id
+Ref "section of": enrollments.NRC > groups.NRC
+Ref "teaches": groups.professor_id > employees.id
+Ref "covers subject": groups.subject_code > subjects.code
+Ref "belongs to program": subjects.program_code > programs.code
+Ref "under area": programs.area_code > areas.code
+Ref "part of faculty": areas.faculty_code > faculties.code
+Ref "coordinates area": areas.coordinator_id > employees.id
+Ref "deans faculty": faculties.dean_id > employees.id
+
+// ── Employment: contract & type classification ──
+
+Ref "contract classification": employees.contract_type > contract_types.name
+Ref "employee role type": employees.employee_type > employee_types.name
+
+// ── Organizational: faculty & campus assignment ──
+
+Ref "works at faculty": employees.faculty_code > faculties.code
+Ref "works at campus": employees.campus_code > campuses.code
+
+// ── Location: birthplace ──
+
+Ref "born in city": students.birth_place_code > cities.code
+Ref "born in city": employees.birth_place_code > cities.code
+
+// ── Campus geography ──
+
+Ref "studies at campus": students.campus_code > campuses.code
+Ref "located in city": campuses.city_code > cities.code
+
+// ── Geographic hierarchy ──
+
+Ref "city in department": cities.dept_code > departments.code
+Ref "department in country": departments.country_code > countries.code
+
+// ═══════════════════════════════════════════════════════════════
+//  Architecture Groups
+// ═══════════════════════════════════════════════════════════════
+
+TableGroup MongoDB___Application_Data {
+  events
+  organizers
+}
+
+TableGroup PostgreSQL___Auth___Stats {
+  users
+  uniplan_statistics
+}
+
+TableGroup PostgreSQL___Institutional___Read_Only {
+  students
+  employees
+  enrollments
+  groups
+  subjects
+  programs
+  areas
+  faculties
+  campuses
+  cities
+  departments
+  countries
+  contract_types
+  employee_types
+}
