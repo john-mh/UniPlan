@@ -27,7 +27,7 @@ export async function register(req: Request, res: Response) {
     );
     res.status(201).json({ message: 'Registration successful' });
   } catch (e: any) {
-    if (e?.code === '23505' || e?.code === 'P2002' || (e?.code === 'P2010' && e?.meta?.message?.includes('23505'))) {
+    if (e?.code === '23505' || e?.code === 'P2002' || e?.code === 'P2010') {
       res.status(409).json({ message: 'User already registered', code: 'DUPLICATE_USER' });
       return;
     }

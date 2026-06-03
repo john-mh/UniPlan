@@ -43,17 +43,3 @@ export function requireRole(...roles: string[]) {
     next();
   };
 }
-
-export function optionalAuth(req: Request, _res: Response, next: NextFunction) {
-  const header = req.headers.authorization;
-  if (header && header.startsWith('Bearer ')) {
-    try {
-      const token = header.split(' ')[1];
-      const decoded = verifyAccessToken(token);
-      req.user = decoded;
-    } catch {
-      // Token invalid — continue without user
-    }
-  }
-  next();
-}
