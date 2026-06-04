@@ -4,6 +4,145 @@
 
 ---
 
+## Autenticación y Seguridad (Preguntas frecuentes del profesor de BD)
+
+### Q1. ¿Cómo funciona el login?
+
+**Respuesta**: `server/src/controllers/authController.ts:36-76`
+
+1. Busca usuario por username en PostgreSQL: `SELECT * FROM users WHERE username = $1` (línea 42-45)
+2. Compara contraseña con bcrypt: `bcrypt.compare(password, user.password_hash)` (línea 52)
+3. Si coincide, genera accessToken (1h) + refreshToken (7d) con JWT
+4. El JWT contiene `{ userId, role, username }` como payload
+
+**Mostrar**: `server/src/utils/jwt.ts:8-30` — `generateTokens()` con `jwt.sign()`
+
+### Q2. ¿Por qué la tabla users está en PostgreSQL y no en MongoDB?
+
+**Respuesta**: Tres razones de base de datos:
+
+1. **Integridad referencial con FKs**: `users.student_id REFERENCES students(id)` y `users.employee_id REFERENCES employees(id)`. MongoDB no tiene FKs nativos — la integridad sería responsabilidad del código (frágil).
+2. **CHECK constraint para roles**: `CHECK ( (role = 'STUDENT' AND student_id IS NOT NULL AND employee_id IS NULL) OR (role IN ('ORGANIZER','ADMIN') AND student_id IS NULL AND employee_id IS NOT NULL) )` — garantiza a nivel de BD que un usuario solo puede tener el rol que corresponde a su tipo de persona.
+3. **UNIQUE INDEX en username**: Previene emails duplicados a nivel de base de datos, no en código.
+
+**Mostrar**: `server/prisma/migrations/.../migration.sql` — la migración con FKs y CHECK constraint.
+
+### Q3. ¿Cómo funciona la autorización por roles?
+
+**Respuesta**: `server/src/middleware/auth.ts`
+
+- `requireAuth` (línea 10-30): Extrae el token del header `Authorization: Bearer <token>`, lo verifica con `jwt.verify()`, y agrega `req.user = { userId, role, username }`.
+- `requireRole(...roles)` (línea 40-50): Middleware factory que verifica que `req.user.role` esté en la lista de roles permitidos.
+
+```typescript
+// Uso en rutas:
+statisticsRoutes.get('/dashboard', requireRole('ADMIN', 'ORGANIZER'), getDashboard);
+reportRoutes.use(requireAuth, requireRole('ADMIN')); // todo /reports/* = solo ADMIN
+```
+
+### Q4. ¿Cómo funciona el refresh token?
+
+**Respuesta**: Dos partes:
+
+**Servidor**: `server/src/controllers/authController.ts:17-22` — endpoint `POST /api/auth/refresh`:
+```typescript
+const payload = jwt.verify(refreshToken, REFRESH_SECRET);
+const user = await query('SELECT * FROM users WHERE id = $1', [payload.userId]);
+// genera nuevo par de tokens
+```
+
+**Cliente**: `client/src/services/api.ts:31-72` — interceptor de Axios:
+```typescript
+api.interceptors.response.use(
+  (res) => res,
+  async (error) => {
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      // Si hay otro refresh en progreso, encola este request
+      if (isRefreshing) return new Promise((resolve, reject) => failedQueue.push({ resolve, reject }));
+      // Intenta refrescar
+      const { data } = await axios.post('/api/auth/refresh', { refreshToken });
+      // Reintenta el request original con el nuevo token
+      return api(originalRequest);
+    }
+  }
+);
+```
+
+### Q5. ¿Cómo hasheas las contraseñas?
+
+**Respuesta**: `server/src/controllers/authController.ts:28`
+
+```typescript
+const passwordHash = await bcrypt.hash(password, 10);
+```
+
+- **bcrypt**: Algoritmo diseñado específicamente para passwords. Lento por diseño — cada hash toma ~100ms con 10 rondas de salt.
+- **10 rondas**: Cada ronda duplica el tiempo. 2^10 = 1024 iteraciones del algoritmo Blowfish.
+- **¿Por qué no SHA-256?**: SHA-256 es rápido (millones de hashes por segundo). Vulnerable a rainbow tables y fuerza bruta con GPU.
+
+### Q6. Muéstrame dónde haces la validación del estudiante al registrarse
+
+**Respuesta**: `server/src/controllers/authController.ts:5-33`
+
+1. **Valida contra BD institucional** (línea 12-14):
+   ```sql
+   SELECT s.first_name, s.last_name FROM public.students s WHERE s.id = $1
+   ```
+   Si el estudiante no existe en la tabla `students` de PostgreSQL, se rechaza el registro. Esto garantiza que solo estudiantes reales de la universidad pueden crear cuenta.
+
+2. **Verifica email duplicado** (línea 19-21):
+   ```sql
+   INSERT INTO users (username, password_hash, role, student_id)
+   VALUES ($1, $2, 'STUDENT', $3)
+   ```
+   Si el username ya existe, PostgreSQL lanza error por UNIQUE constraint → 409 Conflict.
+
+### Q7. ¿Cómo cambia un estudiante a organizador?
+
+**Respuesta**: `server/src/controllers/adminController.ts:56-66` y `organizerController.ts`
+
+1. **Aplicación**: `POST /api/organizers/apply` → crea documento en MongoDB `organizers` con `approvedByAdmin: false`.
+2. **Aprobación**: `POST /api/admin/organizers/:id/approve` → ADMIN aprueba:
+   - MongoDB: `Organizer.findByIdAndUpdate(id, { approvedByAdmin: true })` (línea 59)
+   - PostgreSQL: `UPDATE users SET role = 'ORGANIZER', employee_id = $1 WHERE id = $2` (línea 63-66)
+   - La BD garantiza que el CHECK constraint no se viole (employee_id debe ser NOT NULL para ORGANIZER)
+
+### Q8. ¿Cómo evitas que un request sin token acceda a rutas protegidas?
+
+**Respuesta**: `server/src/middleware/auth.ts:10-30`
+
+```typescript
+const token = req.headers.authorization?.split(' ')[1];
+if (!token) {
+  res.status(401).json({ message: 'No token provided', code: 'UNAUTHORIZED' });
+  return;
+}
+try {
+  const payload = jwt.verify(token, ACCESS_SECRET);
+  req.user = { userId: payload.userId, role: payload.role, username: payload.username };
+  next();
+} catch {
+  res.status(401).json({ message: 'Invalid or expired token', code: 'UNAUTHORIZED' });
+}
+```
+
+### Q9. ¿Dónde configuras rate limiting y seguridad HTTP?
+
+**Respuesta**: `server/src/app.ts:39-58`
+
+```typescript
+app.use(helmet());                          // headers de seguridad HTTP
+app.use(cors({ origin: FRONTEND_URL }));    // solo el frontend puede hacer requests
+
+// 100 req/15min en auth
+app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
+
+// 50 req/15min en endpoints de escritura
+app.use('/api/events', rateLimit({ windowMs: 15 * 60 * 1000, max: 50, skip: (req) => req.method === 'GET' }));
+```
+
+---
+
 ## MongoDB — Modelo de Datos
 
 ### Q1. Muéstrame dónde defines el modelo de eventos en MongoDB
