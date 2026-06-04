@@ -1,0 +1,274 @@
+// =====================================================================
+// UniPlan — Dual-Database Schema
+// =====================================================================
+//   PostgreSQL  institutional tables (read‑only — synced from university ERP)
+//   PostgreSQL  app‑owned tables  (writable by UniPlan)
+//   MongoDB     events, organizers, embedded subdocuments
+// =====================================================================
+
+// ──────────────────────────────────────────────────────────
+// PostgreSQL · Institutional (read‑only)
+// ──────────────────────────────────────────────────────────
+
+Table countries {
+  code int [pk, not null]
+  name varchar(20) [not null]
+}
+
+Table departments {
+  code int [pk, not null]
+  name varchar(20) [not null]
+  country_code int [not null, ref: > countries.code]
+}
+
+Table cities {
+  code int [pk, not null]
+  name varchar(20) [not null]
+  dept_code int [not null, ref: > departments.code]
+}
+
+Table campuses {
+  code int [pk, not null]
+  name varchar(20)
+  city_code int [not null, ref: > cities.code]
+}
+
+Table faculties {
+  code int [pk, not null]
+  name varchar(40) [not null]
+  location varchar(15) [not null]
+  phone_number varchar(15) [not null]
+  dean_id varchar(15)
+}
+
+Table areas {
+  code int [pk, not null]
+  name varchar(20) [not null]
+  faculty_code int [not null, ref: > faculties.code]
+  coordinator_id varchar(15) [not null]
+}
+
+Table programs {
+  code int [pk, not null]
+  name varchar(40) [not null]
+  area_code int [not null, ref: > areas.code]
+}
+
+Table subjects {
+  code varchar(10) [pk, not null]
+  name varchar(30) [not null]
+  program_code int [not null, ref: > programs.code]
+}
+
+Table students {
+  id varchar(15) [pk, not null, note: 'e.g. A00123456']
+  first_name varchar(30) [not null]
+  last_name varchar(30) [not null]
+  email varchar(50) [not null]
+  birth_date date [not null]
+  birth_place_code int [not null, ref: > cities.code]
+  campus_code int [not null, ref: > campuses.code]
+}
+
+Table contract_types {
+  name varchar(30) [pk, not null]
+}
+
+Table employee_types {
+  name varchar(30) [pk, not null]
+}
+
+Table employees {
+  id varchar(15) [pk, not null]
+  first_name varchar(30) [not null]
+  last_name varchar(30) [not null]
+  email varchar(30) [not null]
+  contract_type varchar(30) [not null, ref: > contract_types.name]
+  employee_type varchar(30) [not null, ref: > employee_types.name]
+  faculty_code int [not null, ref: > faculties.code]
+  campus_code int [not null, ref: > campuses.code]
+  birth_place_code int [not null, ref: > cities.code]
+}
+
+Table groups {
+  NRC varchar(10) [pk, not null]
+  number int [not null]
+  semester varchar(6) [not null]
+  subject_code varchar(10) [not null, ref: > subjects.code]
+  professor_id varchar(15) [not null, ref: > employees.id]
+}
+
+Table enrollments {
+  student_id varchar(15) [pk, not null, ref: > students.id]
+  NRC varchar(10) [pk, not null, ref: > groups.NRC]
+  enrollment_date date [not null]
+  status varchar(15) [not null, note: 'Active | Passed | Failed | Withdrawn']
+}
+
+// ──────────────────────────────────────────────────────────
+// PostgreSQL · App Owned (writable)
+// ──────────────────────────────────────────────────────────
+
+Table users {
+  username varchar(30) [pk, not null]
+  password_hash varchar(100) [not null]
+  role varchar(20) [not null, note: 'STUDENT | ORGANIZER | ADMIN']
+  student_id varchar(15) [note: 'nullable — XOR with employee_id']
+  employee_id varchar(15) [note: 'nullable — XOR with student_id']
+  is_active boolean [not null, default: true]
+  created_at timestamp [not null, default: `now()`]
+}
+
+Table uniplan_statistics {
+  id int [pk, not null, increment]
+  event_id varchar(24) [unique, not null, note: 'cross-DB ref → mongo_events._id']
+  total_registered int [not null, default: 0]
+  total_cancelled int [not null, default: 0]
+  total_attended int [not null, default: 0]
+  demographics text [not null, default: '{"by_faculty":{},"by_program":{},"by_campus":{}}']
+  last_updated timestamp [not null, default: `now()`]
+}
+
+// ──────────────────────────────────────────────────────────
+// PostgreSQL foreign keys (read‑only → read‑only)
+// ──────────────────────────────────────────────────────────
+
+Ref: faculties.dean_id > employees.id
+Ref: areas.coordinator_id > employees.id
+Ref: users.student_id > students.id
+Ref: users.employee_id > employees.id
+
+// ──────────────────────────────────────────────────────────
+// MongoDB · Events collection + embedded children
+// ──────────────────────────────────────────────────────────
+
+Table mongo_events {
+  _id varchar(24) [pk, not null]
+  uniqueCode varchar(24) [unique, not null, note: 'auto‑gen EVT‑XXX']
+  title varchar(100) [not null]
+  description text [not null]
+  eventType varchar(30) [not null, note: 'WORKSHOP | TALK | SPORTS_TOURNAMENT | VOLUNTEERING | OTHER']
+  date date [not null]
+  startTime varchar(5) [not null, note: 'HH:MM']
+  endTime varchar(5) [not null, note: 'HH:MM']
+  location varchar(100) [not null]
+  maxAttendees int [not null]
+  status varchar(20) [not null, note: 'UPCOMING | IN_PROGRESS | FINISHED']
+  createdAt timestamp [not null]
+  updatedAt timestamp [not null]
+}
+
+// embedded 1:1
+Table mongo_events_organizer {
+  event_id varchar(24) [pk, not null, note: 'embedded 1:1 → events._id']
+  userId varchar(15) [not null]
+  name varchar(100) [not null]
+  type varchar(20) [not null, note: 'PROFESSOR | STUDENT_LEADER | BIENESTAR_STAFF']
+}
+
+// embedded array
+Table mongo_events_registrations {
+  _id varchar(24) [pk, not null]
+  event_id varchar(24) [not null, note: 'embedded array → events._id']
+  studentId varchar(15) [not null]
+  studentName varchar(100) [not null]
+  faculty varchar(100) [not null]
+  program varchar(100) [not null]
+  campus varchar(100) [not null]
+  registrationDate timestamp [not null]
+  status varchar(15) [not null, note: 'REGISTERED | CANCELLED | ATTENDED']
+  cancellationDate timestamp
+}
+
+// embedded array
+Table mongo_events_messages {
+  _id varchar(24) [pk, not null]
+  event_id varchar(24) [not null, note: 'embedded array → events._id']
+  text text [not null]
+  sentAt timestamp [not null]
+  sentBy varchar(15) [not null]
+  senderName varchar(100) [not null]
+}
+
+// ──────────────────────────────────────────────────────────
+// MongoDB · Events — Polymorphic typeDetails (discriminator)
+// ──────────────────────────────────────────────────────────
+
+Table mongo_events_typedetails_workshop {
+  event_id varchar(24) [pk, not null, note: 'eventType=WORKSHOP']
+  materials text
+  prerequisiteSubjectCode varchar(10)
+  prerequisiteSemester int
+}
+
+Table mongo_events_typedetails_talk {
+  event_id varchar(24) [pk, not null, note: 'eventType=TALK']
+  speakerName varchar(100)
+  speakerProfile text
+  speakerAffiliation varchar(100)
+  relatedLinks text
+  extendedDescription text
+}
+
+Table mongo_events_typedetails_sports {
+  event_id varchar(24) [pk, not null, note: 'eventType=SPORTS_TOURNAMENT']
+  sportType varchar(50) [not null]
+  rules text
+  playersPerTeam int
+  tournamentStructure varchar(50)
+}
+
+Table mongo_events_typedetails_volunteering {
+  event_id varchar(24) [pk, not null, note: 'eventType=VOLUNTEERING']
+  cause varchar(100)
+  hoursRequired int [not null]
+  activities text
+  meetingPoints text
+  responsiblePersons text
+}
+
+Table mongo_events_typedetails_other {
+  event_id varchar(24) [pk, not null, note: 'eventType=OTHER']
+  additionalInfo text
+}
+
+// ──────────────────────────────────────────────────────────
+// MongoDB · Organizers collection
+// ──────────────────────────────────────────────────────────
+
+Table mongo_organizers {
+  _id varchar(24) [pk, not null]
+  userId varchar(15) [unique, not null, note: 'cross-DB ref → users.student_id / users.employee_id']
+  name varchar(100) [not null]
+  email varchar(100) [not null]
+  type varchar(20) [not null, note: 'PROFESSOR | STUDENT_LEADER | BIENESTAR_STAFF']
+  profile_semester int
+  profile_studentGroup varchar(50)
+  profile_department varchar(100)
+  profile_specialization varchar(100)
+  profile_adminArea varchar(100)
+  profile_positionTitle varchar(100)
+  approvedByAdmin boolean [not null, default: false]
+  isActive boolean [not null, default: true]
+  createdAt timestamp [not null]
+  updatedAt timestamp [not null]
+}
+
+// ──────────────────────────────────────────────────────────
+// MongoDB embedded references
+// ──────────────────────────────────────────────────────────
+
+Ref: mongo_events_organizer.event_id - mongo_events._id
+Ref: mongo_events_registrations.event_id > mongo_events._id
+Ref: mongo_events_messages.event_id > mongo_events._id
+Ref: mongo_events_typedetails_workshop.event_id - mongo_events._id
+Ref: mongo_events_typedetails_talk.event_id - mongo_events._id
+Ref: mongo_events_typedetails_sports.event_id - mongo_events._id
+Ref: mongo_events_typedetails_volunteering.event_id - mongo_events._id
+Ref: mongo_events_typedetails_other.event_id - mongo_events._id
+
+// ──────────────────────────────────────────────────────────
+// Cross-database references (logical — not enforced)
+// ──────────────────────────────────────────────────────────
+
+Ref: uniplan_statistics.event_id > mongo_events._id
