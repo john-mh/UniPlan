@@ -1,5 +1,9 @@
 import dotenv from 'dotenv';
-dotenv.config();
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: resolve(__dirname, '..', '.env') });
 
 import express from 'express';
 import cors from 'cors';
@@ -19,8 +23,18 @@ import { statisticsRoutes } from './routes/statistics.js';
 import { reportRoutes } from './routes/reports.js';
 import './observers/StatisticsObserver.js';
 
+const pgPool = new Pool({
+  connectionString: process.env.DATABASE_URL || 'postgresql://postgres.tnrmalseqquagfnjzuem:TzywoxKhlea4Kz1G@aws-1-us-west-2.pooler.supabase.com:5432/postgres',
+  ssl: { rejectUnauthorized: false },
+  max: 5,
+  idleTimeoutMillis: 60000,
+  connectionTimeoutMillis: 10000,
+});
+
+export { pgPool };
+
 export const prisma = new PrismaClient({
-  adapter: new PrismaPg(new Pool({ connectionString: process.env.DATABASE_URL })),
+  adapter: new PrismaPg(pgPool),
 });
 const app = express();
 export { app };
@@ -70,7 +84,7 @@ async function start() {
   });
 
   try {
-    await prisma.$connect();
+    const test = await pgPool.query('SELECT 1 as ok');
     console.log('Connected to PostgreSQL');
   } catch (e) {
     console.error('PostgreSQL connection failed:', (e as Error).message);

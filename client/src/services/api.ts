@@ -170,9 +170,9 @@ export async function rejectOrganizer(id: string) {
   return data;
 }
 
-export async function getAllStatistics() {
-  const { data } = await api.get('/statistics/events');
-  return data.data || data;
+export async function getAllStatistics(params?: Record<string, unknown>) {
+  const { data } = await api.get('/statistics/events', { params });
+  return data;
 }
 
 export async function getEventStatistics(id: string) {
@@ -193,6 +193,47 @@ export async function getParticipationReport() {
 export async function getEngagementReport() {
   const { data } = await api.get('/reports/engagement');
   return data.data || data;
+}
+
+export async function getDashboard() {
+  const { data } = await api.get('/statistics/dashboard');
+  return data;
+}
+
+export async function getFacultyByEventType(months?: number) {
+  const { data } = await api.get('/statistics/faculty-by-event-type', { params: { months } });
+  return data.data || data;
+}
+
+export async function getOrganizerPerformance(months?: number) {
+  const { data } = await api.get('/reports/organizer-performance', { params: { months } });
+  return data.data || data;
+}
+
+export async function getTrendsReport(months?: number) {
+  const { data } = await api.get('/reports/trends', { params: { months } });
+  return data.data || data;
+}
+
+export async function downloadCSV(endpoint: string, filename: string) {
+  const { data } = await api.get(endpoint, { responseType: 'text' });
+  const blob = new Blob([data], { type: 'text/csv' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  window.URL.revokeObjectURL(url);
+}
+
+export async function downloadExcel() {
+  const { data } = await api.get('/reports/export/summary', { responseType: 'blob' });
+  const url = window.URL.createObjectURL(data);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'uniplan-summary.xlsx';
+  a.click();
+  window.URL.revokeObjectURL(url);
 }
 
 export default api;

@@ -17,8 +17,8 @@ export function SidebarLayout({ subtitle, navItems, userPrefix }: SidebarLayoutP
   const location = useLocation();
 
   return (
-    <div className="flex min-h-screen">
-      <aside className="w-60 bg-primary-950 flex flex-col shrink-0">
+    <div className="flex h-screen overflow-hidden">
+      <aside className="w-60 bg-primary-950 flex flex-col shrink-0 overflow-y-auto">
         <div className="p-7">
           <Link to="/" className="text-white font-heading font-bold text-2xl">UniPlan</Link>
           <p className="text-primary-300 text-xs mt-1">{subtitle}</p>
@@ -57,7 +57,7 @@ export function SidebarLayout({ subtitle, navItems, userPrefix }: SidebarLayoutP
           </div>
         )}
       </aside>
-      <main className="flex-1 p-8"><Outlet /></main>
+      <main className="flex-1 p-8 overflow-y-auto"><Outlet /></main>
     </div>
   );
 }

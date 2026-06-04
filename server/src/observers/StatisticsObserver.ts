@@ -1,11 +1,11 @@
-import { prisma } from '../app.js';
+import { pgPool } from '../app.js';
 import { eventBus, EventTopic, RegistrationEvent } from './EventBus.js';
 import { Event } from '../models/mongodb/index.js';
 
 async function updateStat(eventId: string, field: string, delta: number) {
-  await prisma.$executeRawUnsafe(
+  await pgPool.query(
     `UPDATE public.uniplan_statistics SET ${field} = ${field} + $1, last_updated = NOW() WHERE event_id = $2`,
-    delta, eventId,
+    [delta, eventId],
   );
 }
 
@@ -25,10 +25,10 @@ async function updateDemographics(eventId: string) {
     }
   }
 
-  await prisma.$executeRawUnsafe(
+  await pgPool.query(
     `UPDATE public.uniplan_statistics SET demographics = $1, last_updated = NOW() WHERE event_id = $2`,
-    JSON.stringify({ by_faculty: byFaculty, by_program: byProgram, by_campus: byCampus }),
-    eventId,
+    [JSON.stringify({ by_faculty: byFaculty, by_program: byProgram, by_campus: byCampus }),
+    eventId],
   );
 }
 

@@ -169,3 +169,58 @@ export interface ApiError {
   code: string;
   details?: Record<string, string[]>;
 }
+
+export interface RegistrationByEventType {
+  eventType: EventType;
+  registered: number;
+  cancelled: number;
+  attended: number;
+}
+
+export interface EventsByStatus {
+  status: EventStatus;
+  count: number;
+}
+
+export interface DashboardDto {
+  totalEvents: number;
+  activeEvents: number;
+  finishedEvents: number;
+  totalRegistrations: number;
+  totalCancellations: number;
+  totalAttendees: number;
+  totalUniqueStudents: number;
+  totalOrganizers: number;
+  avgOccupancy: number;
+  registrationsByEventType: RegistrationByEventType[];
+  eventsByStatus: EventsByStatus[];
+}
+
+export interface FacultyEventTypeCount {
+  faculty: string;
+  count: number;
+}
+
+export interface FacultyByEventTypeBreakdown {
+  data: Record<string, FacultyEventTypeCount[]>;
+}
+
+export interface OrganizerPerformanceDto {
+  organizerId: string;
+  organizerName: string;
+  eventsCreated: number;
+  totalRegistrations: number;
+  avgOccupancy: number;
+  eventsByApprovedOrganizer: number;
+  eventsByUnapprovedOrganizer: number;
+}
+
+export interface TrendPoint {
+  month: string;
+  registrations: number;
+  events: number;
+}
+
+export interface TrendsDto {
+  data: TrendPoint[];
+}

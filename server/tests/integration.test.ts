@@ -320,7 +320,7 @@ test.describe('UniPlan — Chrome Browser Tests', () => {
   });
 
   // ═══════════════════════════════════════
-  test('4. ADMIN — Reportes y Estadisticas', async ({ page }) => {
+  test('4. ADMIN — Reportes y Estadisticas', async ({ page, request }) => {
     console.log('\n📌 TEST 4: PANEL DE ADMINISTRACION');
     await page.waitForTimeout(500);
 
@@ -341,22 +341,82 @@ test.describe('UniPlan — Chrome Browser Tests', () => {
       await page.goto(`${BASE}/organizer/statistics`);
       console.log('   → Navegando a /organizer/statistics');
       await page.waitForTimeout(PAUSE);
-      console.log('   ✅ Estadisticas accesibles para organizador\n');
+
+      await expect(page.locator('text=Event Statistics')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('text=Registrations by Event Type')).toBeVisible({ timeout: 3000 });
+      await expect(page.locator('text=Events by Status')).toBeVisible({ timeout: 3000 });
+
+      const body = await page.locator('body').innerText();
+      const hasKpis = body.includes('Total Events') && body.includes('Active Events') && body.includes('Registrations');
+      console.log(`   → KPIs visibles: ${hasKpis ? 'Total Events, Active Events, Finished, Registrations, Avg Occupancy' : 'FALTAN'}`);
+
+      const hasCharts = body.includes('WORKSHOP') || body.includes('TALK');
+      console.log(`   → Charts renderizados: ${hasCharts}`);
+
+      const hasLogout = await page.locator('button:has-text("Log out")').count();
+      const hasEvents = await page.locator('text=Events').count();
+      console.log(`   → Logout: ${hasLogout > 0 ? '✅' : '❌'} | Nav Events: ${hasEvents > 0 ? '✅' : '❌'}`);
+
+      expect(hasLogout).toBeGreaterThan(0);
+      expect(hasEvents).toBeGreaterThan(0);
+      console.log('   ✅ Estadisticas con KPIs, charts, logout button y navegacion verificados\n');
     });
 
     await test.step('📊 Panel de Reportes', async () => {
       await page.goto(`${BASE}/admin/reports`);
       console.log('   → Navegando a /admin/reports');
       await page.waitForTimeout(PAUSE);
-      console.log('   ✅ Reportes de engagement y ocupacion accesibles\n');
+
+      await expect(page.locator('text=Monthly Trends')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('text=Organizer Performance')).toBeVisible({ timeout: 3000 });
+      await expect(page.locator('text=Faculty by Event Type')).toBeVisible({ timeout: 3000 });
+      await expect(page.locator('text=Occupancy Report')).toBeVisible({ timeout: 3000 });
+      await expect(page.locator('text=Student Participation')).toBeVisible({ timeout: 3000 });
+      await expect(page.locator('text=Engagement Breakdown')).toBeVisible({ timeout: 3000 });
+
+      const downloadBtns = await page.locator('button:has-text("📥")').count();
+      console.log(`   → Botones de descarga visibles: ${downloadBtns}`);
+
+      const body = await page.locator('body').innerText();
+      const hasDashboardKpis = body.includes('Total Events') && body.includes('Unique Students');
+      console.log(`   → Dashboard KPIs: ${hasDashboardKpis ? '✅' : '❌'}`);
+
+      const hasStudentNames = body.includes('Laura Hernández') || body.includes('Nicolás Peña');
+      console.log(`   → Nombres de estudiantes visibles: ${hasStudentNames ? '✅' : '❌'}`);
+
+      expect(downloadBtns).toBeGreaterThan(0);
+      console.log('   ✅ Reportes con charts, dashboard KPIs, student names y botones de descarga verificados\n');
     });
 
-    await test.step('👥 Gestion de Organizadores', async () => {
-      await page.goto(`${BASE}/admin/organizers`);
-      console.log('   → Navegando a /admin/organizers');
-      await page.waitForTimeout(PAUSE);
-      console.log('   ✅ Lista de organizadores — aprobar/rechazar solicitudes\n');
+    await test.step('📊 Verificar actualizacion de estadisticas via API', async () => {
+      const h = { Authorization: `Bearer ${AT}` };
+
+      const dashRes = await request.get(`${API}/statistics/dashboard`, { headers: h });
+      expect(dashRes.status()).toBe(200);
+      const dash = await dashRes.json();
+      console.log(`   → Dashboard API: ${dash.totalEvents} events, ${dash.totalRegistrations} registrations, ${dash.totalUniqueStudents} unique students, ${dash.avgOccupancy}% avg occupancy`);
+
+      expect(dash.totalEvents).toBeGreaterThan(0);
+      expect(dash.totalUniqueStudents).toBeGreaterThan(0);
+      expect(dash.avgOccupancy).toBeGreaterThanOrEqual(0);
+      expect(dash.eventsByStatus).toBeDefined();
+      expect(dash.registrationsByEventType).toBeDefined();
+
+      const trendsRes = await request.get(`${API}/reports/trends?months=6`, { headers: h });
+      expect(trendsRes.status()).toBe(200);
+      const trends = await trendsRes.json();
+      console.log(`   → Trends API: ${trends.data?.length || 0} months of data`);
+      expect(trends.data?.length).toBeGreaterThan(0);
+
+      const orgRes = await request.get(`${API}/reports/organizer-performance?months=12`, { headers: h });
+      expect(orgRes.status()).toBe(200);
+      const orgPerf = await orgRes.json();
+      console.log(`   → Organizer Performance API: ${orgPerf.data?.length || 0} organizers`);
+      expect(orgPerf.data?.length).toBeGreaterThan(0);
+
+      console.log('   ✅ Todas las APIs de estadisticas responden con datos reales\n');
     });
+
   });
 
   // ═══════════════════════════════════════

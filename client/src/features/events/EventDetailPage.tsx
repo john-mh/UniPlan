@@ -51,6 +51,9 @@ export function EventDetailPage() {
   const spotsLeft = ev.maxAttendees - ev.currentRegistrations;
   const pct = Math.round((ev.currentRegistrations / ev.maxAttendees) * 100);
   const alreadyRegistered = myRegs?.some((r: any) => r.eventId === ev.id && r.status === 'REGISTERED');
+  const eventDate = new Date(ev.date);
+  const today = new Date(new Date().toDateString());
+  const isPastEvent = eventDate < today;
 
   return (
     <div className="max-w-6xl mx-auto px-8 py-8">
@@ -91,7 +94,12 @@ export function EventDetailPage() {
             </div>
             <p className="text-xs text-gray-400 mb-6">{pct}% filled</p>
 
-            {!isAuthenticated ? (
+            {isPastEvent ? (
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 text-center">
+                <p className="text-gray-500 text-sm font-medium">This event has ended</p>
+                <p className="text-gray-400 text-xs mt-1">{formatDate(ev.date, true)}</p>
+              </div>
+            ) : !isAuthenticated ? (
               <Button variant="primary" className="w-full" onClick={() => navigate('/login')}>Log in to Register</Button>
             ) : alreadyRegistered ? (
               <Button variant="outline" className="w-full" disabled>Already Registered</Button>

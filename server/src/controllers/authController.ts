@@ -1,29 +1,27 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcrypt';
-import { prisma } from '../app.js';
+import { pgPool } from '../app.js';
 import { generateAccessToken, generateRefreshToken, verifyRefreshToken } from '../utils/jwt.js';
 import { registerSchema, loginSchema } from '../utils/validation.js';
 import { handleZodError } from '../utils/handleZodError.js';
+
+const q = (sql: string, params?: any[]) => pgPool.query(sql, params);
 
 export async function register(req: Request, res: Response) {
   try {
     const data = registerSchema.parse(req.body);
 
-    const existingStudent = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
-      'SELECT id FROM public.students WHERE id = $1',
-      data.studentCode,
-    );
+    const existingStudent = await q('SELECT id FROM public.students WHERE id = $1', [data.studentCode]);
 
-    if (!existingStudent || existingStudent.length === 0) {
+    if (!existingStudent || existingStudent.rows.length === 0) {
       res.status(404).json({ message: 'Student code not found in institutional database', code: 'STUDENT_NOT_FOUND' });
       return;
     }
 
     const hash = await bcrypt.hash(data.password, 12);
-    await prisma.$executeRawUnsafe(
-      `INSERT INTO public.users (username, password_hash, role, student_id)
-       VALUES ($1, $2, 'STUDENT', $3)`,
-      data.email, hash, data.studentCode,
+    await q(
+      `INSERT INTO public.users (username, password_hash, role, student_id) VALUES ($1, $2, 'STUDENT', $3)`,
+      [data.email, hash, data.studentCode],
     );
     res.status(201).json({ message: 'Registration successful' });
   } catch (e: any) {
@@ -40,15 +38,15 @@ export async function register(req: Request, res: Response) {
 export async function login(req: Request, res: Response) {
   try {
     const data = loginSchema.parse(req.body);
-    const users = await prisma.$queryRawUnsafe<Array<{ username: string; password_hash: string; role: string; student_id: string | null; employee_id: string | null }>>(
+    const users = await q(
       'SELECT username, password_hash, role, student_id, employee_id FROM public.users WHERE username = $1 AND is_active = true',
-      data.username,
+      [data.username],
     );
-    if (!users || users.length === 0) {
+    if (!users || users.rows.length === 0) {
       res.status(401).json({ message: 'Invalid credentials', code: 'INVALID_CREDENTIALS' });
       return;
     }
-    const user = users[0];
+    const user = users.rows[0];
     const valid = await bcrypt.compare(data.password, user.password_hash);
     if (!valid) {
       res.status(401).json({ message: 'Invalid credentials', code: 'INVALID_CREDENTIALS' });
@@ -73,15 +71,15 @@ export async function refresh(req: Request, res: Response) {
   }
   try {
     const decoded = verifyRefreshToken(refreshToken);
-    const users = await prisma.$queryRawUnsafe<Array<{ role: string }>>(
+    const users = await q(
       `SELECT role FROM public.users WHERE (student_id = $1 OR employee_id = $1 OR username = $1) AND is_active = true`,
-      decoded.userId,
+      [decoded.userId],
     );
-    if (!users || users.length === 0) {
+    if (!users || users.rows.length === 0) {
       res.status(401).json({ message: 'User not found', code: 'USER_NOT_FOUND' });
       return;
     }
-    const accessToken = generateAccessToken(decoded.userId, users[0].role);
+    const accessToken = generateAccessToken(decoded.userId, users.rows[0].role);
     const newRefreshToken = generateRefreshToken(decoded.userId);
     res.json({ accessToken, refreshToken: newRefreshToken });
   } catch (e: any) {
@@ -97,21 +95,15 @@ export async function logout(_req: Request, res: Response) {
 export async function me(req: Request, res: Response) {
   try {
     const userId = req.user!.userId;
-    const students = await prisma.$queryRawUnsafe<Array<{ id: string; first_name: string; last_name: string; email: string }>>(
-      'SELECT id, first_name, last_name, email FROM public.students WHERE id = $1',
-      userId,
-    );
-    if (students && students.length > 0) {
-      const s = students[0];
+    const students = await q('SELECT id, first_name, last_name, email FROM public.students WHERE id = $1', [userId]);
+    if (students && students.rows.length > 0) {
+      const s = students.rows[0];
       res.json({ id: s.id, firstName: s.first_name, lastName: s.last_name, email: s.email, role: req.user!.role });
       return;
     }
-    const employees = await prisma.$queryRawUnsafe<Array<{ id: string; first_name: string; last_name: string; email: string }>>(
-      'SELECT id, first_name, last_name, email FROM public.employees WHERE id = $1',
-      userId,
-    );
-    if (employees && employees.length > 0) {
-      const e = employees[0];
+    const employees = await q('SELECT id, first_name, last_name, email FROM public.employees WHERE id = $1', [userId]);
+    if (employees && employees.rows.length > 0) {
+      const e = employees.rows[0];
       res.json({ id: e.id, firstName: e.first_name, lastName: e.last_name, email: e.email, role: req.user!.role });
       return;
     }

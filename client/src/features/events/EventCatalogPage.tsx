@@ -19,7 +19,7 @@ export function EventCatalogPage() {
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['events', typeParam, debouncedSearch, page],
-    queryFn: () => api.getEvents({ type: typeParam || '', search: debouncedSearch || '', limit: 12, page }),
+    queryFn: () => api.getEvents({ type: typeParam || '', search: debouncedSearch || '', limit: 12, page, status: 'UPCOMING' }),
   });
 
   const totalPages = data?.totalPages || 1;
