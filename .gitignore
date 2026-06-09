@@ -8,7 +8,8 @@ dist/
 *.tsbuildinfo
 coverage/
 .DS_Store
-#.priv
+.priv
+server/downloads/
 .idea
 test-results/
 .playwright-mcp/
